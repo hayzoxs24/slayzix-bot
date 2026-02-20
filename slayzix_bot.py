@@ -6,7 +6,7 @@ import asyncio
 # ============================================================
 #   ⚙️  CONFIG — Remplace ces valeurs par les tiennes
 # ============================================================
-TOKEN          = "MTQ2NTA1NzE3OTg0ODY3MTM4Mw.GHe67x.Z5hJz4YeYS03AMsC8qc7yX-Z2HNvh5s9DryqrM"
+TOKEN          = "MTQ2NTA1NzE3OTg0ODY3MTM4Mw.GokXHc.m1CVCwUAHI4U-iRC4MGE2ER2nylLWLlD2QkvaE"
 CHANNEL_ID     = 1474164824660377772  # ID du channel où envoyer l'embed
 CATEGORY_ID    = 1457482620249309390  # ID de la catégorie pour les tickets
 STAFF_ROLE_ID  = 1256671391575703623  # ID du rôle staff/admin qui voit les tickets
