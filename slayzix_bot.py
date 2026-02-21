@@ -174,5 +174,75 @@ async def shop(ctx):
 @bot.event
 async def on_ready():
     print(f"✅ Connecté en tant que {bot.user}")
+    
+# ================= DISCORD =================    
 
+@bot.command()
+async def discord(ctx):
+    embed = discord.Embed(
+        title="💬 DISCORD SERVICES",
+        description="Services rapides et sécurisés via PayPal 💳",
+        color=discord.Color.blurple()
+    )
+
+    embed.add_field(
+        name="👥 Membres Discord",
+        value=(
+            "➤ **1 000 Membres en ligne**\n"
+            "Prix : 4.50€\n"
+            "Paiement : PayPal\n\n"
+            "➤ **1 000 Membres hors-ligne**\n"
+            "Prix : 4€\n"
+            "Paiement : PayPal"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="🚀 Boost Serveur",
+        value=(
+            "➤ **Boost Serveur x14**\n"
+            "Prix : 3€\n"
+            "Paiement : PayPal"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="🎁 Nitro",
+        value=(
+            "➤ **Nitro (1 mois)**\n"
+            "Prix : 3.50€\n\n"
+            "➤ **Nitro Basique (1 mois)**\n"
+            "Prix : 2€\n\n"
+            "Paiement : PayPal"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="🎨 Profile Decorations (Gift Link)",
+        value=(
+            "4.99€ → 1.75€\n"
+            "5.99€ → 2.39€\n"
+            "6.99€ → 2.55€\n"
+            "7.99€ → 2.91€\n"
+            "8.49€ → 3.25€\n"
+            "9.99€ → 3.60€\n"
+            "11.99€ → 3.95€\n\n"
+            "Paiement : PayPal"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="📩 Commande",
+        value="Commande en ticket.\nPrix susceptibles d’évoluer selon la demande. ⏳",
+        inline=False
+    )
+
+    embed.set_footer(text="Powered by Slayzix's Shop")
+
+    await ctx.send(embed=embed)
+    
 bot.run(TOKEN)
