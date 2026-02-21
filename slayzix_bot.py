@@ -30,21 +30,15 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 class ServiceSelect(Select):
     def __init__(self):
         options = [
-            discord.SelectOption(label="Followers", description="Boost abonnés TikTok 🚀"),
-            discord.SelectOption(label="Likes", description="Augmente les likes ❤️"),
-            discord.SelectOption(label="Views", description="Augmente les vues 👀"),
+            discord.SelectOption(label="Followers", description="Abonnés TikTok 🚀"),
+            discord.SelectOption(label="Likes", description="Likes TikTok ❤️"),
+            discord.SelectOption(label="Views", description="Vues TikTok 👀"),
         ]
 
         super().__init__(
-            placeholder="🚀 Boost Premium TikTok\n\n"
-    "• Followers haute qualité\n"
-    "• Likes instantanés\n"
-    "• Views rapides\n\n"
-    "⚡ Livraison en moins de 24h\n"
-    "🔒 Paiement sécurisé via PayPal\n"
-    "💬 Support actif\n\n"
-    "👇 Sélectionne ton service",
-            options=options
+            placeholder="Choisis ton service",
+            options=options,
+            custom_id="service_select"
         )
 
     async def callback(self, interaction: discord.Interaction):
@@ -82,6 +76,7 @@ class QuantityModal(discord.ui.Modal, title="Quantité (multiple de 1000)"):
             )
 
         price = (qty / 1000) * PRICES[self.service]
+        price_formatted = f"{price:.2f}"
 
         guild = interaction.guild
 
@@ -92,7 +87,7 @@ class QuantityModal(discord.ui.Modal, title="Quantité (multiple de 1000)"):
         }
 
         channel = await guild.create_text_channel(
-            name=f"commande-{interaction.user.name}",
+            name=f"commande-{interaction.user.name}".replace(" ", "-").lower(),
             overwrites=overwrites
         )
 
@@ -101,12 +96,15 @@ class QuantityModal(discord.ui.Modal, title="Quantité (multiple de 1000)"):
             description=(
                 f"🎯 Service : **{self.service}**\n"
                 f"📦 Quantité : **{qty}**\n"
-                f"💰 Prix : **{price}€**"
+                f"💰 Prix : **{price_formatted}€**\n\n"
+                f"⚡ Livraison garantie en moins de 24h\n"
+                f"🔒 Paiement sécurisé via PayPal\n"
+                f"💬 Support actif si besoin"
             ),
             color=discord.Color.purple()
         )
 
-        embed.set_footer(text="Slayzix Shop")
+        embed.set_footer(text="Slayzix Shop • Livraison rapide -24H")
 
         await channel.send(
             content=interaction.user.mention,
@@ -137,7 +135,11 @@ class TicketView(View):
             url=PAYPAL_SLAYZIX
         ))
 
-    @discord.ui.button(label="🔒 Fermer", style=discord.ButtonStyle.danger)
+    @discord.ui.button(
+        label="🔒 Fermer",
+        style=discord.ButtonStyle.danger,
+        custom_id="close_ticket"
+    )
     async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.channel.delete()
 
@@ -153,16 +155,24 @@ async def shop(ctx):
 
     embed = discord.Embed(
         title="💎 SLAYZIX SHOP — TikTok Boost",
-        description="Sélectionne ton service ci-dessous 👇",
+        description=(
+            "🚀 Followers haute qualité\n"
+            "❤️ Likes instantanés\n"
+            "👀 Views rapides\n\n"
+            "⚡ Livraison en moins de 24h\n"
+            "🔒 Paiement sécurisé\n"
+            "💬 Support actif\n\n"
+            "👇 Sélectionne ton service"
+        ),
         color=discord.Color.purple()
     )
 
     await ctx.send(embed=embed, view=MainView())
 
+# ================= READY =================
+
 @bot.event
 async def on_ready():
-    bot.add_view(MainView())
-    bot.add_view(TicketView())
     print(f"✅ Connecté en tant que {bot.user}")
 
 bot.run(TOKEN)
