@@ -35,6 +35,12 @@ VALORANT_PRICES = {
     "Riot Points": None
 }
 
+ROCKETLEAGUE_PRICES = {
+    "Crédits Rocket League": None,
+    "Objets / Skins": None,
+    "Comptes Rocket League": None
+}
+
 # ================= BOUTON FERMETURE =================
 
 class CloseTicketView(discord.ui.View):
@@ -400,6 +406,54 @@ class ValorantView(discord.ui.View):
         super().__init__(timeout=None)
         self.add_item(ValorantSelect())
 
+
+class RocketLeagueModal(discord.ui.Modal):
+
+    def __init__(self, service):
+        super().__init__(title="Commande Rocket League")
+        self.service = service
+
+        self.details = discord.ui.TextInput(
+            label="Décris ta demande",
+            style=discord.TextStyle.paragraph,
+            required=True,
+            placeholder="Ex: quantité de crédits, item souhaité, rang du compte..."
+        )
+        self.add_item(self.details)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        description = (
+            f"📦 Service : **{self.service}**\n"
+            f"📝 Détails : **{self.details.value}**\n\n"
+            f"💳 Paiement PayPal\n"
+            f"💬 Un vendeur reviendra vers toi rapidement"
+        )
+        await create_ticket(
+            interaction,
+            "🎫 Ticket Rocket League",
+            description
+        )
+
+
+class RocketLeagueSelect(discord.ui.Select):
+
+    def __init__(self):
+        options = [
+            discord.SelectOption(label="Crédits Rocket League", emoji="💳", description="Prix en ticket"),
+            discord.SelectOption(label="Objets / Skins", emoji="🎨", description="Items rares / Black Market / Import"),
+            discord.SelectOption(label="Comptes Rocket League", emoji="🏆", description="Rang / skins / inventaire"),
+        ]
+        super().__init__(placeholder="Choisis ton service", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(RocketLeagueModal(self.values[0]))
+
+
+class RocketLeagueView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(RocketLeagueSelect())
+
 # ================= COMMANDES =================
 
 @bot.command()
@@ -483,6 +537,23 @@ async def valorant(ctx):
         color=discord.Color.blurple()
     )
     await ctx.send(embed=embed, view=ValorantView())
+
+@bot.command()
+async def rocket(ctx):
+    embed = discord.Embed(
+        title="💎 SLAYZIX SHOP — Rocket League Services",
+        description=(
+            "💳 Crédits — Toutes quantités\n"
+            "🎨 Objets / Skins — Items rares / Black Market / Import\n"
+            "🏆 Comptes — Rang / skins / inventaire\n\n"
+            "💳 Paiement PayPal\n"
+            "🔒 Paiement sécurisé\n"
+            "💬 Support actif\n\n"
+            "👇 Sélectionne ton service"
+        ),
+        color=discord.Color.blurple()
+    )
+    await ctx.send(embed=embed, view=RocketLeagueView())
 
 # ================= START =================
 
