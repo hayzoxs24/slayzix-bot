@@ -1,3 +1,6 @@
+
+Copier
+
 import discord
 from discord.ext import commands
 import os
@@ -84,7 +87,6 @@ class QuantityModal(discord.ui.Modal):
         self.add_item(self.quantity)
 
     async def on_submit(self, interaction: discord.Interaction):
-
         try:
             value = int(self.quantity.value)
 
@@ -95,25 +97,37 @@ class QuantityModal(discord.ui.Modal):
                         "❌ Minimum 1000 et multiple de 1000.",
                         ephemeral=True
                     )
-
                 price = (value / 1000) * TIKTOK_PRICES[self.service]
 
             # ===== DISCORD =====
             else:
+                # 👥 Membres (multiple de 1000 obligatoire)
                 if "Membres" in self.service:
                     if value < 1000 or value % 1000 != 0:
                         return await interaction.response.send_message(
                             "❌ Minimum 1000 et multiple de 1000.",
                             ephemeral=True
                         )
-
                     price = (value / 1000) * DISCORD_PRICES[self.service]
-                else:
+
+                # 🚀 Boost x14 & 🎁 Nitro (quantité libre)
+                elif self.service in ["Boost x14", "Nitro 1 mois"]:
+                    if value < 1:
+                        return await interaction.response.send_message(
+                            "❌ Quantité invalide.",
+                            ephemeral=True
+                        )
                     price = value * DISCORD_PRICES[self.service]
 
-        except:
+                else:
+                    return await interaction.response.send_message(
+                        "❌ Service inconnu.",
+                        ephemeral=True
+                    )
+
+        except ValueError:
             return await interaction.response.send_message(
-                "❌ Valeur invalide.",
+                "❌ Valeur invalide. Entre un nombre entier.",
                 ephemeral=True
             )
 
@@ -169,7 +183,6 @@ class ServiceView(discord.ui.View):
 
 @bot.command()
 async def tiktok(ctx):
-
     embed = discord.Embed(
         title="💎 SLAYZIX SHOP — TikTok Boost",
         description=(
@@ -183,17 +196,15 @@ async def tiktok(ctx):
         ),
         color=discord.Color.blurple()
     )
-
     await ctx.send(embed=embed, view=ServiceView("tiktok"))
 
 @bot.command()
 async def discordpanel(ctx):
-
     embed = discord.Embed(
         title="💎 SLAYZIX SHOP — Discord Services",
         description=(
             "👥 Membres haute qualité\n"
-            "🚀 Boost rapides\n"
+            "🚀 Boosts rapides\n"
             "🎁 Nitro instantané\n\n"
             "⚡ Livraison rapide\n"
             "🔒 Paiement sécurisé\n"
@@ -202,7 +213,6 @@ async def discordpanel(ctx):
         ),
         color=discord.Color.blurple()
     )
-
     await ctx.send(embed=embed, view=ServiceView("discord"))
 
 # ================= START =================
