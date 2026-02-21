@@ -39,7 +39,7 @@ async def create_ticket(interaction, title, description):
     existing = discord.utils.get(guild.text_channels, name=f"ticket-{user.id}")
     if existing:
         return await interaction.response.send_message(
-            "❌ Tu as déjà un ticket ouvert.",
+            f"❌ Tu as déjà un ticket ouvert → {existing.mention}",
             ephemeral=True
         )
 
@@ -66,7 +66,10 @@ async def create_ticket(interaction, title, description):
     embed.set_footer(text="Slayzix Shop")
 
     await channel.send(user.mention, embed=embed, view=CloseTicketView())
-    await interaction.response.send_message("✅ Ticket créé !", ephemeral=True)
+    await interaction.response.send_message(
+        f"✅ Ticket créé ! → {channel.mention}",
+        ephemeral=True
+    )
 
 # ================= MODAL =================
 
