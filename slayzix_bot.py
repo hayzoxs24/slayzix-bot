@@ -1,167 +1,124 @@
-import os
 import discord
 from discord.ext import commands
-from discord.ui import View, Button, Select
-import asyncio
+import json
+import os
 
-# ================= CONFIG =================
-CHANNEL_ID = 1474164824660377772
-CATEGORY_ID = 1457482620249309390
-STAFF_ROLE_ID = 1256671391575703623
-# ==========================================
+TOKEN = os.getenv("TOKEN")  # Mets ton token en variable d'environnement
 
 intents = discord.Intents.default()
 intents.message_content = True
-intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+DATA_FILE = "shop_data.json"
 
-# ─────────────────────────────────────────
-#   BOUTON FERMER TICKET
-# ─────────────────────────────────────────
-class CloseTicketView(View):
-    def __init__(self):
-        super().__init__(timeout=None)
+# ------------------------
+# Système de sauvegarde
+# ------------------------
 
-    @discord.ui.button(label="🔒 Fermer le ticket", style=discord.ButtonStyle.danger, custom_id="close_ticket")
-    async def close_ticket(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_message("⏳ Fermeture dans 5 secondes...", ephemeral=True)
-        await asyncio.sleep(5)
-        await interaction.channel.delete()
+def load_data():
+    if not os.path.exists(DATA_FILE):
+        with open(DATA_FILE, "w") as f:
+            json.dump({}, f)
+    with open(DATA_FILE, "r") as f:
+        return json.load(f)
 
+def save_data(data):
+    with open(DATA_FILE, "w") as f:
+        json.dump(data, f, indent=4)
 
-# ─────────────────────────────────────────
-#   MENU SELECTION SERVICE
-# ─────────────────────────────────────────
-class ServiceSelect(View):
-    def __init__(self, user):
-        super().__init__(timeout=120)
-        self.user = user
+data = load_data()
 
-    @discord.ui.select(
-        placeholder="🛒 Choisis ton service...",
-        custom_id="service_select",
-        options=[
-            discord.SelectOption(label="1 000 Followers TikTok", description="2,50€ — PayPal", emoji="🎵"),
-            discord.SelectOption(label="10 000 Followers TikTok", description="25,00€ — PayPal", emoji="🎵"),
-            discord.SelectOption(label="1 000 Followers Instagram", description="5,00€ — PayPal", emoji="📸"),
-            discord.SelectOption(label="10 000 Followers Instagram", description="50,00€ — PayPal", emoji="📸"),
-        ]
-    )
-    async def select_service(self, interaction: discord.Interaction, select: Select):
+# ------------------------
+# Configuration du shop
+# ------------------------
 
-        if interaction.user != self.user:
-            await interaction.response.send_message("❌ Ce menu ne t'appartient pas.", ephemeral=True)
-            return
+SHOP_ITEMS = {
+    "vip": 500,
+    "sword": 300,
+    "shield": 250,
+    "potion": 100
+}
 
-        guild = interaction.guild
-        category = guild.get_channel(CATEGORY_ID)
-        staff_role = guild.get_role(STAFF_ROLE_ID)
+# ------------------------
+# Events
+# ------------------------
 
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(read_messages=False),
-            interaction.user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-            staff_role: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-        }
-
-        channel = await guild.create_text_channel(
-            name=f"ticket-{interaction.user.name}",
-            category=category,
-            overwrites=overwrites
-        )
-
-        embed = discord.Embed(
-            title="🎟️ Nouveau Ticket",
-            description=f"Service choisi : **{select.values[0]}**\nUn membre du staff va te répondre.",
-            color=0x00f5ff
-        )
-
-        await channel.send(
-            content=f"{interaction.user.mention} | {staff_role.mention}",
-            embed=embed,
-            view=CloseTicketView()
-        )
-
-        await interaction.response.send_message(
-            f"✅ Ticket créé : {channel.mention}",
-            ephemeral=True
-        )
-
-        self.stop()
-
-
-# ─────────────────────────────────────────
-#   BOUTON OUVRIR TICKET
-# ─────────────────────────────────────────
-class ShopView(View):
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @discord.ui.button(label="🎟️ Commander", style=discord.ButtonStyle.primary, custom_id="open_ticket")
-    async def open_ticket(self, interaction: discord.Interaction, button: Button):
-
-        for channel in interaction.guild.text_channels:
-            if channel.name == f"ticket-{interaction.user.name}":
-                await interaction.response.send_message(
-                    f"❌ Tu as déjà un ticket : {channel.mention}",
-                    ephemeral=True
-                )
-                return
-
-        embed = discord.Embed(
-            title="🛒 Slayzix Shop",
-            description="Choisis ton service dans le menu ci-dessous.",
-            color=0x00f5ff
-        )
-
-        await interaction.response.send_message(
-            embed=embed,
-            view=ServiceSelect(interaction.user),
-            ephemeral=True
-        )
-
-
-# ─────────────────────────────────────────
-#   COMMANDE !shop
-# ─────────────────────────────────────────
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def shop(ctx):
-
-    channel = bot.get_channel(CHANNEL_ID)
-
-    if channel is None:
-        await ctx.send("❌ CHANNEL_ID incorrect.")
-        return
-
-    embed = discord.Embed(
-        title="⚡ Slayzix Shop",
-        description="Clique sur le bouton pour commander.",
-        color=0x00f5ff
-    )
-
-    await channel.send(embed=embed, view=ShopView())
-    await ctx.message.delete()
-
-
-# ─────────────────────────────────────────
-#   READY EVENT
-# ─────────────────────────────────────────
 @bot.event
 async def on_ready():
-    bot.add_view(ShopView())
-    bot.add_view(CloseTicketView())
     print(f"✅ Connecté en tant que {bot.user}")
 
+# ------------------------
+# Commandes
+# ------------------------
 
-# ─────────────────────────────────────────
-#   TOKEN (NE JAMAIS METTRE EN DUR)
-# ─────────────────────────────────────────
-TOKEN = os.environ.get("TOKEN")
+@bot.command()
+async def balance(ctx):
+    user_id = str(ctx.author.id)
 
-if not TOKEN:
-    raise ValueError("TOKEN manquant dans Railway Variables")
+    if user_id not in data:
+        data[user_id] = {"money": 0, "inventory": []}
+        save_data(data)
+
+    await ctx.send(f"💰 {ctx.author.mention} a {data[user_id]['money']} coins.")
+
+@bot.command()
+async def shop(ctx):
+    embed = discord.Embed(title="🛒 Boutique", color=discord.Color.green())
+
+    for item, price in SHOP_ITEMS.items():
+        embed.add_field(name=item.capitalize(), value=f"{price} coins", inline=False)
+
+    await ctx.send(embed=embed)
+
+@bot.command()
+async def buy(ctx, item: str):
+    user_id = str(ctx.author.id)
+    item = item.lower()
+
+    if item not in SHOP_ITEMS:
+        await ctx.send("❌ Cet objet n'existe pas.")
+        return
+
+    if user_id not in data:
+        data[user_id] = {"money": 0, "inventory": []}
+
+    price = SHOP_ITEMS[item]
+
+    if data[user_id]["money"] < price:
+        await ctx.send("❌ Tu n'as pas assez d'argent.")
+        return
+
+    data[user_id]["money"] -= price
+    data[user_id]["inventory"].append(item)
+    save_data(data)
+
+    await ctx.send(f"✅ {ctx.author.mention} a acheté **{item}** pour {price} coins.")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def addmoney(ctx, member: discord.Member, amount: int):
+    user_id = str(member.id)
+
+    if user_id not in data:
+        data[user_id] = {"money": 0, "inventory": []}
+
+    data[user_id]["money"] += amount
+    save_data(data)
+
+    await ctx.send(f"💸 {member.mention} reçoit {amount} coins.")
+
+@bot.command()
+async def inventory(ctx):
+    user_id = str(ctx.author.id)
+
+    if user_id not in data or not data[user_id]["inventory"]:
+        await ctx.send("📦 Ton inventaire est vide.")
+        return
+
+    items = "\n".join(data[user_id]["inventory"])
+    await ctx.send(f"📦 Inventaire de {ctx.author.mention} :\n{items}")
+
+# ------------------------
 
 bot.run(TOKEN)
