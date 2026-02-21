@@ -1,3 +1,6 @@
+
+Copier
+
 import discord
 from discord.ext import commands
 import os
@@ -77,8 +80,13 @@ class QuantityModal(discord.ui.Modal):
         self.service = service
         self.platform = platform
 
+        if self.service in ["Boost x14", "Nitro 1 mois"]:
+            label = "Quantité"
+        else:
+            label = "Quantité (multiple de 1000)"
+
         self.quantity = discord.ui.TextInput(
-            label="Quantité (multiple de 1000 si membres)",
+            label=label,
             required=True
         )
         self.add_item(self.quantity)
