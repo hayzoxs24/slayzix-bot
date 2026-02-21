@@ -1,1 +1,0 @@
-worker: python slayzix_bot.py
