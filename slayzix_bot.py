@@ -1,3 +1,6 @@
+
+Copier
+
 import discord
 from discord.ext import commands
 import os
@@ -18,6 +21,12 @@ DISCORD_PRICES = {
     "Membres hors-ligne": 4,
     "Boost x14": 3,
     "Nitro 1 mois": 3.5
+}
+
+FORTNITE_PRICES = {
+    "V-Bucks": 7.50,
+    "Packs de skins / bundles": None,
+    "Comptes Fortnite": None
 }
 
 # ================= BOUTON FERMETURE =================
@@ -147,6 +156,65 @@ class QuantityModal(discord.ui.Modal):
             f"💬 Merci de patienter"
         )
 
+
+class FortniteModal(discord.ui.Modal):
+
+    def __init__(self, service):
+        super().__init__(title="Commande Fortnite")
+        self.service = service
+
+        if service == "V-Bucks":
+            self.quantity = discord.ui.TextInput(
+                label="Quantité de V-Bucks (multiple de 1000)",
+                required=True
+            )
+            self.add_item(self.quantity)
+        else:
+            self.details = discord.ui.TextInput(
+                label="Décris ta demande",
+                style=discord.TextStyle.paragraph,
+                required=True,
+                placeholder="Ex: skin souhaité, budget, compte recherché..."
+            )
+            self.add_item(self.details)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if self.service == "V-Bucks":
+            try:
+                value = int(self.quantity.value)
+                if value < 1000 or value % 1000 != 0:
+                    return await interaction.response.send_message(
+                        "❌ Minimum 1000 et multiple de 1000.",
+                        ephemeral=True
+                    )
+                price = (value / 1000) * FORTNITE_PRICES["V-Bucks"]
+                description = (
+                    f"📦 Service : **V-Bucks**\n"
+                    f"🔢 Quantité : **{value}**\n"
+                    f"💰 Prix : **{price:.2f}€**\n\n"
+                    f"💳 Paiement PayPal\n"
+                    f"⚡ Livraison rapide\n"
+                    f"💬 Merci de patienter"
+                )
+            except ValueError:
+                return await interaction.response.send_message(
+                    "❌ Valeur invalide. Entre un nombre entier.",
+                    ephemeral=True
+                )
+        else:
+            description = (
+                f"📦 Service : **{self.service}**\n"
+                f"📝 Détails : **{self.details.value}**\n\n"
+                f"💳 Paiement PayPal\n"
+                f"💬 Un vendeur reviendra vers toi rapidement"
+            )
+
+        await create_ticket(
+            interaction,
+            "🎫 Ticket Fortnite",
+            description
+        )
+
 # ================= SELECT =================
 
 class ServiceSelect(discord.ui.Select):
@@ -184,6 +252,25 @@ class ServiceView(discord.ui.View):
         super().__init__(timeout=None)
         self.add_item(ServiceSelect(platform))
 
+
+class FortniteSelect(discord.ui.Select):
+
+    def __init__(self):
+        options = [
+            discord.SelectOption(label="V-Bucks", emoji="💎", description="1000 V-Bucks = 7.50€"),
+            discord.SelectOption(label="Packs de skins / bundles", emoji="🎁", description="Prix en ticket"),
+            discord.SelectOption(label="Comptes Fortnite", emoji="🎮", description="Prix en ticket"),
+        ]
+        super().__init__(placeholder="Choisis ton service", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(FortniteModal(self.values[0]))
+
+class FortniteView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(FortniteSelect())
+
 # ================= COMMANDES =================
 
 @bot.command()
@@ -219,6 +306,23 @@ async def discordpanel(ctx):
         color=discord.Color.blurple()
     )
     await ctx.send(embed=embed, view=ServiceView("discord"))
+
+@bot.command()
+async def fortnite(ctx):
+    embed = discord.Embed(
+        title="💎 SLAYZIX SHOP — Fortnite Services",
+        description=(
+            "💎 V-Bucks — 1000 = 7.50€\n"
+            "🎁 Packs de skins / bundles — Prix en ticket\n"
+            "🎮 Comptes Fortnite — Prix en ticket\n\n"
+            "💳 Paiement PayPal\n"
+            "🔒 Paiement sécurisé\n"
+            "💬 Support actif\n\n"
+            "👇 Sélectionne ton service"
+        ),
+        color=discord.Color.blurple()
+    )
+    await ctx.send(embed=embed, view=FortniteView())
 
 # ================= START =================
 
