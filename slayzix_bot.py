@@ -57,6 +57,8 @@ FOURNISSEUR_PRICES = {
     "Tous les fournisseurs": 50.0
 }
 
+ALLSHOP_PRICE = 75.0
+
 # ================= BOUTON FERMETURE =================
 
 class CloseTicketView(discord.ui.View):
@@ -562,6 +564,26 @@ class FournisseurView(discord.ui.View):
         super().__init__(timeout=None)
         self.add_item(FournisseurSelect())
 
+
+class AllShopView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="🛒 Commander le Pack Complet", style=discord.ButtonStyle.success)
+    async def order(self, interaction: discord.Interaction, button: discord.ui.Button):
+        description = (
+            f"📦 Service : **Pack Shop Complet — Offre Premium**\n"
+            f"💰 Prix : **{ALLSHOP_PRICE:.2f}€**\n\n"
+            f"✅ Accès Fournisseurs inclus\n"
+            f"✅ Serveur Discord prêt à vendre\n"
+            f"✅ Gestion complète (Management)\n"
+            f"✅ Organisation & mise en place\n"
+            f"✅ Conseils & optimisation\n\n"
+            f"💳 Paiement PayPal\n"
+            f"💬 Un vendeur reviendra vers toi rapidement"
+        )
+        await create_ticket(interaction, "🎫 Ticket Pack Shop Complet", description)
+
 # ================= COMMANDES =================
 
 @bot.command()
@@ -700,6 +722,28 @@ async def fourni(ctx):
         color=discord.Color.blurple()
     )
     await ctx.send(embed=embed, view=FournisseurView())
+
+@bot.command()
+async def allshop(ctx):
+    embed = discord.Embed(
+        title="💎 SLAYZIX SHOP — Pack Shop Complet",
+        description=(
+            "🏆 **Offre Premium – Shop clé en main**\n\n"
+            "✅ Accès Fournisseurs inclus\n"
+            "✅ Serveur Discord prêt à vendre\n"
+            "✅ Gestion complète (Management)\n"
+            "✅ Organisation & mise en place\n"
+            "✅ Conseils & optimisation\n\n"
+            "Tout est fourni pour lancer votre business immédiatement.\n\n"
+            "💰 Prix total : **75€**\n"
+            "💳 Paiement PayPal\n"
+            "🔒 Paiement sécurisé\n"
+            "💬 Support actif\n\n"
+            "👇 Clique pour commander"
+        ),
+        color=discord.Color.gold()
+    )
+    await ctx.send(embed=embed, view=AllShopView())
 
 # ================= START =================
 
