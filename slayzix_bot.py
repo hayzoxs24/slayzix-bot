@@ -108,9 +108,9 @@ class MainView(View):
 class DiscordServiceSelect(Select):
     def __init__(self):
         options = [
-            discord.SelectOption(label="Membres en ligne", emoji="👥"),
-            discord.SelectOption(label="Membres hors-ligne", emoji="👤"),
-            discord.SelectOption(label="Boost x14", emoji="🚀"),
+            discord.SelectOption(label="Membres en ligne x1000", emoji="👥"),
+            discord.SelectOption(label="Membres hors-ligne x1000", emoji="👤"),
+            discord.SelectOption(label="Boost serveur x14", emoji="🚀"),
             discord.SelectOption(label="Nitro 1 mois", emoji="🎁"),
         ]
 
@@ -133,7 +133,7 @@ class DiscordQuantityModal(discord.ui.Modal, title="Quantité"):
         self.service = service
 
         self.quantity = discord.ui.TextInput(
-            label="Quantité (ex: 1, 2, 3...)",
+            label="Quantité (ex: 1000 , 2000 , 3000...)",
             required=True
         )
         self.add_item(self.quantity)
