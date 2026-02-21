@@ -40,30 +40,6 @@ PRICES = {
 }
 
 # =============================
-# CLOSE CONFIRM
-# =============================
-
-class CloseConfirmSelect(discord.ui.Select):
-    def __init__(self):
-        options = [
-            discord.SelectOption(label="Confirmer la fermeture", emoji="✅"),
-            discord.SelectOption(label="Annuler", emoji="❌")
-        ]
-        super().__init__(placeholder="Confirmer la fermeture ?", options=options)
-
-    async def callback(self, interaction: discord.Interaction):
-        if self.values[0] == "Confirmer la fermeture":
-            await interaction.channel.send("🔒 Ticket fermé.")
-            await interaction.channel.delete()
-        else:
-            await interaction.response.send_message("❌ Fermeture annulée.", ephemeral=True)
-
-class CloseConfirmView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=30)
-        self.add_item(CloseConfirmSelect())
-
-# =============================
 # QUANTITY MODAL
 # =============================
 
@@ -71,7 +47,7 @@ class QuantityModal(discord.ui.Modal, title="Entrer la quantité"):
 
     quantity = discord.ui.TextInput(
         label="Quantité (multiple de 1000 uniquement)",
-        placeholder="1000, 2000, 3000...",
+        placeholder="Exemple: 1000, 2000, 3000...",
         required=True
     )
 
@@ -104,36 +80,18 @@ class QuantityModal(discord.ui.Modal, title="Entrer la quantité"):
         embed = discord.Embed(
             title="🧾 Facture",
             description=(
-                f"📦 Service : {self.service}\n"
-                f"🔢 Quantité : {quantity}\n"
-                f"💰 Total : **{total}€**"
+                f"📦 Service : **{self.service}**\n"
+                f"🔢 Quantité : **{quantity}**\n"
+                f"💰 Total : **{total}€**\n\n"
+                "🚀 Livraison rapide\n"
+                "🔒 Service sécurisé\n"
+                "💎 Haute qualité garantie"
             ),
             color=discord.Color.green()
         )
 
         await interaction.channel.send(embed=embed, view=PaymentView(self.creator))
         await interaction.response.send_message("✅ Quantité validée.", ephemeral=True)
-
-# =============================
-# QUANTITY BUTTON VIEW
-# =============================
-
-class QuantityButtonView(discord.ui.View):
-    def __init__(self, creator, service):
-        super().__init__(timeout=None)
-        self.creator = creator
-        self.service = service
-
-    @discord.ui.button(label="✏️ Entrer la quantité", style=discord.ButtonStyle.primary)
-    async def open_modal(self, interaction: discord.Interaction, button: discord.ui.Button):
-
-        if interaction.user != self.creator:
-            await interaction.response.send_message("❌ Ce n'est pas ton ticket.", ephemeral=True)
-            return
-
-        await interaction.response.send_modal(
-            QuantityModal(self.creator, self.service)
-        )
 
 # =============================
 # PAYMENT VIEW
@@ -182,6 +140,27 @@ class PaymentView(discord.ui.View):
         await interaction.channel.send("✅ Paiement confirmé. Commande lancée 🚀")
         await interaction.response.defer()
 
+# =============================
+# QUANTITY BUTTON VIEW
+# =============================
+
+class QuantityButtonView(discord.ui.View):
+    def __init__(self, creator, service):
+        super().__init__(timeout=None)
+        self.creator = creator
+        self.service = service
+
+    @discord.ui.button(label="✏️ Entrer la quantité", style=discord.ButtonStyle.primary)
+    async def open_modal(self, interaction: discord.Interaction, button: discord.ui.Button):
+
+        if interaction.user != self.creator:
+            await interaction.response.send_message("❌ Ce n'est pas ton ticket.", ephemeral=True)
+            return
+
+        await interaction.response.send_modal(
+            QuantityModal(self.creator, self.service)
+        )
+
     @discord.ui.button(label="🔒 Fermer le ticket", style=discord.ButtonStyle.danger)
     async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
 
@@ -189,11 +168,8 @@ class PaymentView(discord.ui.View):
             await interaction.response.send_message("❌ Staff uniquement.", ephemeral=True)
             return
 
-        await interaction.response.send_message(
-            "⚠️ Confirmation requise :",
-            view=CloseConfirmView(),
-            ephemeral=True
-        )
+        await interaction.channel.send("🔒 Ticket fermé par le staff.")
+        await interaction.channel.delete()
 
 # =============================
 # SERVICE SELECT
@@ -233,10 +209,21 @@ class MainServiceSelect(discord.ui.Select):
         )
 
         embed = discord.Embed(
-            title="🎫 Nouveau Ticket",
-            description=f"Service sélectionné : **{service}**\n\nClique pour entrer la quantité.",
+            title="🎫 SLAYZIX PREMIUM SERVICE",
+            description=(
+                f"👤 Client : {interaction.user.mention}\n"
+                f"📦 Service sélectionné : **{service}**\n\n"
+                "💎 Nous offrons :\n"
+                "• Livraison rapide et progressive\n"
+                "• Comptes de haute qualité\n"
+                "• Aucun mot de passe requis\n"
+                "• Support réactif 24/7\n\n"
+                "Clique sur **Entrer la quantité** pour continuer."
+            ),
             color=discord.Color.blurple()
         )
+
+        embed.set_footer(text=f"Ticket #{ticket_number} • Service sécurisé")
 
         await channel.send(
             embed=embed,
@@ -261,9 +248,18 @@ class MainView(discord.ui.View):
 async def shop(ctx):
     embed = discord.Embed(
         title="💎 SLAYZIX PREMIUM SHOP",
-        description="Sélectionne un service ci-dessous.",
+        description=(
+            "Bienvenue dans notre boutique officielle.\n\n"
+            "🚀 Followers, Views & Likes haute qualité\n"
+            "🔒 Paiement sécurisé\n"
+            "⚡ Livraison rapide\n\n"
+            "Sélectionne un service ci-dessous pour commencer."
+        ),
         color=discord.Color.purple()
     )
+
+    embed.set_footer(text="Qualité • Sécurité • Rapidité")
+
     await ctx.send(embed=embed, view=MainView())
 
 bot.run(TOKEN)
