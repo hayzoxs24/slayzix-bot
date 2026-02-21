@@ -10,10 +10,12 @@ intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-STAFF_ROLE_NAME = "Staff"
+STAFF_ROLES = ["Manager", "Founders"]
+
+ticket_counter = 0
 
 # ===============================
-# VIEW TICKET (CLAIM + CLOSE)
+# VIEW TICKET
 # ===============================
 
 class TicketView(discord.ui.View):
@@ -21,14 +23,12 @@ class TicketView(discord.ui.View):
         super().__init__(timeout=None)
         self.claimed_by = None
 
-    @discord.ui.button(label="🔔 Réclamer le ticket", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="🔔 Réclamer", style=discord.ButtonStyle.success)
     async def claim_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
 
-        staff_role = discord.utils.get(interaction.guild.roles, name=STAFF_ROLE_NAME)
-
-        if staff_role not in interaction.user.roles:
+        if not any(role.name in STAFF_ROLES for role in interaction.user.roles):
             await interaction.response.send_message(
-                "❌ Seul le staff peut réclamer un ticket.",
+                "❌ Seuls les Managers ou Founders peuvent réclamer.",
                 ephemeral=True
             )
             return
@@ -47,18 +47,15 @@ class TicketView(discord.ui.View):
         await interaction.message.edit(view=self)
 
         await interaction.response.send_message(
-            f"🔔 {interaction.user.mention} a réclamé le ticket.",
-            ephemeral=False
+            f"🔔 {interaction.user.mention} a pris en charge le ticket."
         )
 
-    @discord.ui.button(label="🔒 Fermer le ticket", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="🔒 Fermer", style=discord.ButtonStyle.danger)
     async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
 
-        staff_role = discord.utils.get(interaction.guild.roles, name=STAFF_ROLE_NAME)
-
-        if staff_role not in interaction.user.roles:
+        if not any(role.name in STAFF_ROLES for role in interaction.user.roles):
             await interaction.response.send_message(
-                "❌ Seul le staff peut fermer le ticket.",
+                "❌ Seuls les Managers ou Founders peuvent fermer.",
                 ephemeral=True
             )
             return
@@ -77,18 +74,20 @@ class ShopView(discord.ui.View):
     @discord.ui.button(label="🌐 Réseaux Sociaux", style=discord.ButtonStyle.danger)
     async def open_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
 
+        global ticket_counter
+        ticket_counter += 1
+
         guild = interaction.guild
         user = interaction.user
 
-        staff_role = discord.utils.get(guild.roles, name=STAFF_ROLE_NAME)
-
-        existing = discord.utils.get(guild.channels, name=f"ticket-{user.id}")
-        if existing:
-            await interaction.response.send_message(
-                "❌ Tu as déjà un ticket ouvert.",
-                ephemeral=True
-            )
-            return
+        # Vérifie si l'utilisateur a déjà un ticket
+        for channel in guild.text_channels:
+            if channel.name.startswith("ticket-") and user in channel.members:
+                await interaction.response.send_message(
+                    "❌ Tu as déjà un ticket ouvert.",
+                    ephemeral=True
+                )
+                return
 
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
@@ -96,17 +95,23 @@ class ShopView(discord.ui.View):
             guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True),
         }
 
-        if staff_role:
-            overwrites[staff_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+        # Ajoute permissions Manager & Founders
+        for role_name in STAFF_ROLES:
+            role = discord.utils.get(guild.roles, name=role_name)
+            if role:
+                overwrites[role] = discord.PermissionOverwrite(
+                    read_messages=True,
+                    send_messages=True
+                )
 
         channel = await guild.create_text_channel(
-            name=f"ticket-{user.id}",
+            name=f"ticket-{ticket_counter:03}",
             overwrites=overwrites
         )
 
         embed = discord.Embed(
-            title="🎫 Ticket Support",
-            description="Un membre du staff va te répondre rapidement.",
+            title=f"🎫 Ticket #{ticket_counter:03}",
+            description="Merci d’indiquer ce que tu souhaites commander.",
             color=discord.Color.green()
         )
 
