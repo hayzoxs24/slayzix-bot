@@ -10,23 +10,64 @@ intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-STAFF_ROLE_NAME = "Staff"  # facultatif
+STAFF_ROLE_NAME = "Staff"
 
 # ===============================
-# VIEW FERMER TICKET
+# VIEW TICKET (CLAIM + CLOSE)
 # ===============================
 
-class CloseTicketView(discord.ui.View):
+class TicketView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
+        self.claimed_by = None
+
+    @discord.ui.button(label="🔔 Réclamer le ticket", style=discord.ButtonStyle.success)
+    async def claim_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+
+        staff_role = discord.utils.get(interaction.guild.roles, name=STAFF_ROLE_NAME)
+
+        if staff_role not in interaction.user.roles:
+            await interaction.response.send_message(
+                "❌ Seul le staff peut réclamer un ticket.",
+                ephemeral=True
+            )
+            return
+
+        if self.claimed_by:
+            await interaction.response.send_message(
+                f"❌ Ticket déjà réclamé par {self.claimed_by.mention}.",
+                ephemeral=True
+            )
+            return
+
+        self.claimed_by = interaction.user
+        button.disabled = True
+        button.label = f"✅ Réclamé par {interaction.user.name}"
+
+        await interaction.message.edit(view=self)
+
+        await interaction.response.send_message(
+            f"🔔 {interaction.user.mention} a réclamé le ticket.",
+            ephemeral=False
+        )
 
     @discord.ui.button(label="🔒 Fermer le ticket", style=discord.ButtonStyle.danger)
     async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message("🔒 Fermeture du ticket...", ephemeral=True)
+
+        staff_role = discord.utils.get(interaction.guild.roles, name=STAFF_ROLE_NAME)
+
+        if staff_role not in interaction.user.roles:
+            await interaction.response.send_message(
+                "❌ Seul le staff peut fermer le ticket.",
+                ephemeral=True
+            )
+            return
+
+        await interaction.response.send_message("🔒 Fermeture du ticket...")
         await interaction.channel.delete()
 
 # ===============================
-# VIEW SHOP (BOUTON)
+# VIEW SHOP
 # ===============================
 
 class ShopView(discord.ui.View):
@@ -34,10 +75,11 @@ class ShopView(discord.ui.View):
         super().__init__(timeout=None)
 
     @discord.ui.button(label="🌐 Réseaux Sociaux", style=discord.ButtonStyle.danger)
-    async def social_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def open_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
 
         guild = interaction.guild
         user = interaction.user
+
         staff_role = discord.utils.get(guild.roles, name=STAFF_ROLE_NAME)
 
         existing = discord.utils.get(guild.channels, name=f"ticket-{user.id}")
@@ -62,9 +104,16 @@ class ShopView(discord.ui.View):
             overwrites=overwrites
         )
 
+        embed = discord.Embed(
+            title="🎫 Ticket Support",
+            description="Un membre du staff va te répondre rapidement.",
+            color=discord.Color.green()
+        )
+
         await channel.send(
-            f"{user.mention} 🎫 Merci d’indiquer ce que tu souhaites commander.",
-            view=CloseTicketView()
+            content=f"{user.mention}",
+            embed=embed,
+            view=TicketView()
         )
 
         await interaction.response.send_message(
@@ -87,46 +136,29 @@ async def shop(ctx):
     embed.description = """
 👥 **Followers**
 
-➤ 1 000 Followers TikTok  
-Prix : **2.50€**  
-Paiement : Paypal  
+➤ 1 000 Followers TikTok — **2.50€**
+➤ 1 000 Followers Instagram — **5€**
+➤ 10 000 Followers TikTok — **25€**
+➤ 10 000 Followers Instagram — **50€**
 
-➤ 1 000 Followers Instagram  
-Prix : **5€**  
-Paiement : Paypal  
+━━━━━━━━━━━━━━━━━━━━
 
-➤ 10 000 Followers TikTok  
-Prix : **25€**  
-Paiement : Paypal  
+👀 **Views (TikTok uniquement)**
 
-➤ 10 000 Followers Instagram  
-Prix : **50€**  
-Paiement : Paypal  
+➤ 1 000 Views — **0.15€**
+➤ 10 000 Views — **1.50€**
 
-━━━━━━━━━━━━━━━━━━━━  
+━━━━━━━━━━━━━━━━━━━━
 
-👀 **Views (TikTok uniquement)**  
+❤️ **Likes (TikTok uniquement)**
 
-➤ 1 000 Views  
-Prix : **0.15€**  
+➤ 1 000 Likes — **1€**
+➤ 10 000 Likes — **10€**
 
-➤ 10 000 Views  
-Prix : **1.50€**  
+━━━━━━━━━━━━━━━━━━━━
 
-━━━━━━━━━━━━━━━━━━━━  
-
-❤️ **Likes (TikTok uniquement)**  
-
-➤ 1 000 Likes  
-Prix : **1€**  
-
-➤ 10 000 Likes  
-Prix : **10€**  
-
-━━━━━━━━━━━━━━━━━━━━  
-
-Commande rapide en ticket.  
-Prix susceptibles d’évoluer selon la demande. ⏳  
+Commande rapide en ticket.
+Prix susceptibles d’évoluer selon la demande. ⏳
 
 Powered by Slayzix's Shop
 """
@@ -140,7 +172,7 @@ Powered by Slayzix's Shop
 @bot.event
 async def on_ready():
     bot.add_view(ShopView())
-    bot.add_view(CloseTicketView())
+    bot.add_view(TicketView())
     print(f"✅ Connecté en tant que {bot.user}")
 
 # ===============================
