@@ -1,124 +1,109 @@
 import discord
 from discord.ext import commands
-import json
 import os
 
-TOKEN = os.getenv("TOKEN")  # Mets ton token en variable d'environnement
+TOKEN = os.getenv("TOKEN")
 
 intents = discord.Intents.default()
 intents.message_content = True
+intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-DATA_FILE = "shop_data.json"
+# ==============================
+# VIEW DU SHOP
+# ==============================
 
-# ------------------------
-# Système de sauvegarde
-# ------------------------
+class ShopView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
 
-def load_data():
-    if not os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "w") as f:
-            json.dump({}, f)
-    with open(DATA_FILE, "r") as f:
-        return json.load(f)
+    @discord.ui.button(label="📱 Réseaux sociaux", style=discord.ButtonStyle.primary)
+    async def social_button(self, interaction: discord.Interaction, button: discord.ui.Button):
 
-def save_data(data):
-    with open(DATA_FILE, "w") as f:
-        json.dump(data, f, indent=4)
+        guild = interaction.guild
+        user = interaction.user
 
-data = load_data()
+        # Vérifie si ticket existe déjà
+        existing = discord.utils.get(guild.channels, name=f"ticket-{user.name}")
+        if existing:
+            await interaction.response.send_message(
+                "❌ Tu as déjà un ticket ouvert.",
+                ephemeral=True
+            )
+            return
 
-# ------------------------
-# Configuration du shop
-# ------------------------
+        # Permissions
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
+        }
 
-SHOP_ITEMS = {
-    "vip": 500,
-    "sword": 300,
-    "shield": 250,
-    "potion": 100
-}
+        channel = await guild.create_text_channel(
+            name=f"ticket-{user.name}",
+            overwrites=overwrites
+        )
 
-# ------------------------
-# Events
-# ------------------------
+        embed = discord.Embed(
+            title="📱 TIKTOK / INSTAGRAM SERVICES",
+            description="""
+👥 **Followers**
+➤ 1 000 Followers TikTok — 2.50€
+➤ 1 000 Followers Instagram — 5€
+➤ 10 000 Followers TikTok — 25€
+➤ 10 000 Followers Instagram — 50€
+
+━━━━━━━━━━━━━━━━━━━━
+
+👀 **Views (TikTok uniquement)**
+➤ 1 000 Views — 0.15€
+➤ 10 000 Views — 1.50€
+
+━━━━━━━━━━━━━━━━━━━━
+
+❤️ **Likes (TikTok uniquement)**
+➤ 1 000 Likes — 1€
+➤ 10 000 Likes — 10€
+
+━━━━━━━━━━━━━━━━━━━━
+
+💳 Paiement : Paypal  
+⏳ Prix susceptibles d’évoluer  
+⚡ Powered by Slayzix's Shop
+""",
+            color=discord.Color.green()
+        )
+
+        await channel.send(f"{user.mention}", embed=embed)
+        await interaction.response.send_message(
+            f"✅ Ticket créé : {channel.mention}",
+            ephemeral=True
+        )
+
+# ==============================
+# EVENT READY
+# ==============================
 
 @bot.event
 async def on_ready():
+    bot.add_view(ShopView())
     print(f"✅ Connecté en tant que {bot.user}")
 
-# ------------------------
-# Commandes
-# ------------------------
-
-@bot.command()
-async def balance(ctx):
-    user_id = str(ctx.author.id)
-
-    if user_id not in data:
-        data[user_id] = {"money": 0, "inventory": []}
-        save_data(data)
-
-    await ctx.send(f"💰 {ctx.author.mention} a {data[user_id]['money']} coins.")
+# ==============================
+# COMMANDE SHOP
+# ==============================
 
 @bot.command()
 async def shop(ctx):
-    embed = discord.Embed(title="🛒 Boutique", color=discord.Color.green())
+    embed = discord.Embed(
+        title="🛒 Boutique Slayzix",
+        description="Clique sur le bouton ci-dessous pour ouvrir un ticket.",
+        color=discord.Color.blue()
+    )
 
-    for item, price in SHOP_ITEMS.items():
-        embed.add_field(name=item.capitalize(), value=f"{price} coins", inline=False)
+    await ctx.send(embed=embed, view=ShopView())
 
-    await ctx.send(embed=embed)
-
-@bot.command()
-async def buy(ctx, item: str):
-    user_id = str(ctx.author.id)
-    item = item.lower()
-
-    if item not in SHOP_ITEMS:
-        await ctx.send("❌ Cet objet n'existe pas.")
-        return
-
-    if user_id not in data:
-        data[user_id] = {"money": 0, "inventory": []}
-
-    price = SHOP_ITEMS[item]
-
-    if data[user_id]["money"] < price:
-        await ctx.send("❌ Tu n'as pas assez d'argent.")
-        return
-
-    data[user_id]["money"] -= price
-    data[user_id]["inventory"].append(item)
-    save_data(data)
-
-    await ctx.send(f"✅ {ctx.author.mention} a acheté **{item}** pour {price} coins.")
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def addmoney(ctx, member: discord.Member, amount: int):
-    user_id = str(member.id)
-
-    if user_id not in data:
-        data[user_id] = {"money": 0, "inventory": []}
-
-    data[user_id]["money"] += amount
-    save_data(data)
-
-    await ctx.send(f"💸 {member.mention} reçoit {amount} coins.")
-
-@bot.command()
-async def inventory(ctx):
-    user_id = str(ctx.author.id)
-
-    if user_id not in data or not data[user_id]["inventory"]:
-        await ctx.send("📦 Ton inventaire est vide.")
-        return
-
-    items = "\n".join(data[user_id]["inventory"])
-    await ctx.send(f"📦 Inventaire de {ctx.author.mention} :\n{items}")
-
-# ------------------------
+# ==============================
 
 bot.run(TOKEN)
