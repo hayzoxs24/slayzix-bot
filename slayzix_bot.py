@@ -17,7 +17,7 @@ DISCORD_PRICES = {
     "Membres en ligne": 4.5,
     "Membres hors-ligne": 4,
     "Boost x14": 3,
-    "Nitro 1 mois": 3.5
+    "Nitro 1 mois": 3.75
 }
 
 FORTNITE_PRICES = {
