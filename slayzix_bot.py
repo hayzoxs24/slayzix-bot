@@ -870,6 +870,102 @@ async def on_member_remove(member):
 
     await channel.send(embed=embed)
 
+vouch_channel_id = None
+
+# ================= VOUCH =================
+
+class VouchChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self):
+        super().__init__(
+            placeholder="Choisis le salon des avis",
+            channel_types=[discord.ChannelType.text]
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        global vouch_channel_id
+        vouch_channel_id = self.values[0].id
+        await interaction.response.send_message(
+            f"✅ Salon des avis défini sur {self.values[0].mention} !",
+            ephemeral=True
+        )
+
+class VouchSetupView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(VouchChannelSelect())
+
+@bot.command()
+async def setvouchchannel(ctx):
+    embed = discord.Embed(
+        title="⚙️ Configuration — Avis",
+        description="Sélectionne le salon où les avis seront postés.",
+        color=discord.Color.blurple()
+    )
+    await ctx.send(embed=embed, view=VouchSetupView())
+
+@bot.tree.command(name="vouch", description="Laisse un avis sur le shop !")
+@discord.app_commands.describe(
+    note="Ta note sur 5",
+    service="Le service acheté",
+    commentaire="Ton commentaire"
+)
+@discord.app_commands.choices(note=[
+    discord.app_commands.Choice(name="⭐ 1/5", value=1),
+    discord.app_commands.Choice(name="⭐⭐ 2/5", value=2),
+    discord.app_commands.Choice(name="⭐⭐⭐ 3/5", value=3),
+    discord.app_commands.Choice(name="⭐⭐⭐⭐ 4/5", value=4),
+    discord.app_commands.Choice(name="⭐⭐⭐⭐⭐ 5/5", value=5),
+])
+async def vouch(interaction: discord.Interaction, note: int, service: str, commentaire: str):
+    stars = "⭐" * note + "🌑" * (5 - note)
+
+    colors = {
+        1: discord.Color.red(),
+        2: discord.Color.orange(),
+        3: discord.Color.yellow(),
+        4: discord.Color.green(),
+        5: discord.Color.gold()
+    }
+
+    badges = {
+        1: "😡 Très mauvais",
+        2: "😕 Mauvais",
+        3: "😐 Correct",
+        4: "😊 Bien",
+        5: "🤩 Excellent !"
+    }
+
+    embed = discord.Embed(
+        title="📝 Nouvel Avis — Slayzix Shop",
+        color=colors[note]
+    )
+    embed.add_field(name="👤 Client", value=interaction.user.mention, inline=True)
+    embed.add_field(name="📦 Service", value=f"**{service}**", inline=True)
+    embed.add_field(name="⭐ Note", value=f"{stars}  `{note}/5` — {badges[note]}", inline=False)
+    embed.add_field(name="💬 Commentaire", value=f"*{commentaire}*", inline=False)
+    embed.set_thumbnail(url=interaction.user.display_avatar.url)
+    embed.set_footer(text="Slayzix Shop • Merci pour ton avis !")
+    embed.timestamp = discord.utils.utcnow()
+
+    # Post dans le salon vouch si défini
+    if vouch_channel_id:
+        channel = interaction.guild.get_channel(vouch_channel_id)
+        if channel:
+            await channel.send(embed=embed)
+            await interaction.response.send_message(
+                f"✅ Ton avis a été posté dans {channel.mention}, merci ! 🙏",
+                ephemeral=True
+            )
+            return
+
+    # Sinon on poste dans le salon courant
+    await interaction.response.send_message(embed=embed)
+
+@bot.event
+async def on_ready():
+    await bot.tree.sync()
+    print(f"✅ {bot.user} connecté et slash commands synchronisées !")
+
 # ================= START =================
 
 if __name__ == "__main__":
