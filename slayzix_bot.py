@@ -1,265 +1,205 @@
 import discord
 from discord.ext import commands
-import json
-import os
 
-TOKEN = os.getenv("TOKEN")
+TOKEN = "TON_TOKEN_ICI"
+CATEGORY_ID = 123456789
 
-if not TOKEN:
-    print("TOKEN manquant.")
-    exit()
+BANNER_URL = "https://cdn.discordapp.com/attachments/1462275672503357705/1474577936265904198/IMG_4255.png?ex=699a5b38&is=699909b8&hm=c7fe4cbce99d75b832edb22ba31db9a0d86711dc1f9bd32c14e6c1010307a302&"
 
-intents = discord.Intents.all()
+intents = discord.Intents.default()
+intents.guilds = True
+intents.members = True
+intents.message_content = True
+
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-TICKET_FILE = "tickets.json"
 
-# =============================
-# SAVE SYSTEM
-# =============================
+# ==========================================
+# MODAL POUR QUANTITÉ (MULTIPLE DE 1000)
+# ==========================================
 
-def load_data():
-    if not os.path.exists(TICKET_FILE):
-        with open(TICKET_FILE, "w") as f:
-            json.dump({"counter": 0}, f)
-    with open(TICKET_FILE, "r") as f:
-        return json.load(f)
-
-def save_data(data):
-    with open(TICKET_FILE, "w") as f:
-        json.dump(data, f, indent=4)
-
-# =============================
-# PRICES
-# =============================
-
-PRICES = {
-    "Followers": 0.0025,
-    "Views": 0.00015,
-    "Likes": 0.001
-}
-
-# =============================
-# QUANTITY MODAL
-# =============================
-
-class QuantityModal(discord.ui.Modal, title="Entrer la quantité"):
+class QuantityModal(discord.ui.Modal, title="Entrer la quantité (multiple de 1000)"):
 
     quantity = discord.ui.TextInput(
-        label="Quantité (multiple de 1000 uniquement)",
-        placeholder="Exemple: 1000, 2000, 3000...",
+        label="Quantité souhaitée",
+        placeholder="Exemple: 1000 / 2000 / 5000",
         required=True
     )
 
-    def __init__(self, creator, service):
+    def __init__(self, service):
         super().__init__()
-        self.creator = creator
         self.service = service
 
     async def on_submit(self, interaction: discord.Interaction):
-
-        if interaction.user != self.creator:
-            await interaction.response.send_message("❌ Ce n'est pas ton ticket.", ephemeral=True)
-            return
-
         try:
-            quantity = int(self.quantity.value)
-        except:
-            await interaction.response.send_message("❌ Nombre invalide.", ephemeral=True)
-            return
+            amount = int(self.quantity.value)
 
-        if quantity < 1000 or quantity % 1000 != 0:
+            if amount < 1000 or amount % 1000 != 0:
+                await interaction.response.send_message(
+                    "❌ La quantité doit être un multiple de 1000 (1000, 2000, 3000...)",
+                    ephemeral=True
+                )
+                return
+
+            embed = discord.Embed(
+                title="💳 Détails de la commande",
+                description=(
+                    f"📦 **Service :** {self.service}\n"
+                    f"🔢 **Quantité :** {amount}\n\n"
+                    "📩 Envoie ton lien dans ce salon.\n"
+                    "💰 Le prix sera communiqué par le staff.\n"
+                    "⚡ Livraison rapide.\n"
+                    "💎 Haute qualité garantie."
+                ),
+                color=discord.Color.green()
+            )
+
+            embed.set_image(url=BANNER_URL)
+            embed.set_footer(text="Elite Social Boost • Premium Services")
+
+            await interaction.response.send_message(embed=embed)
+
+        except ValueError:
             await interaction.response.send_message(
-                "❌ La quantité doit être 1000, 2000, 3000 etc.",
+                "❌ Merci d'entrer un nombre valide.",
                 ephemeral=True
             )
-            return
 
-        total = round(quantity * PRICES[self.service], 2)
 
-        embed = discord.Embed(
-            title="🧾 Facture",
-            description=(
-                f"📦 Service : **{self.service}**\n"
-                f"🔢 Quantité : **{quantity}**\n"
-                f"💰 Total : **{total}€**\n\n"
-                "🚀 Livraison rapide\n"
-                "🔒 Service sécurisé\n"
-                "💎 Haute qualité garantie"
-            ),
-            color=discord.Color.green()
+# ==========================================
+# BOUTONS DU TICKET
+# ==========================================
+
+class QuantityButton(discord.ui.Button):
+    def __init__(self, service):
+        super().__init__(
+            label="✏️ Entrer la quantité",
+            style=discord.ButtonStyle.primary
         )
-
-        await interaction.channel.send(embed=embed, view=PaymentView(self.creator))
-        await interaction.response.send_message("✅ Quantité validée.", ephemeral=True)
-
-# =============================
-# PAYMENT VIEW
-# =============================
-
-class PaymentView(discord.ui.View):
-    def __init__(self, creator):
-        super().__init__(timeout=None)
-        self.creator = creator
-        self.paid = False
-
-        self.add_item(discord.ui.Button(
-            label="💳 PayPal HayZoXs",
-            style=discord.ButtonStyle.link,
-            url="https://www.paypal.me/HayZoXs"
-        ))
-
-        self.add_item(discord.ui.Button(
-            label="💳 PayPal Slayzix",
-            style=discord.ButtonStyle.link,
-            url="https://www.paypal.me/SlayzixxBetter"
-        ))
-
-    @discord.ui.button(label="✅ J'ai payé", style=discord.ButtonStyle.success)
-    async def paid_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-
-        if interaction.user != self.creator:
-            await interaction.response.send_message("❌ Seul le client peut cliquer.", ephemeral=True)
-            return
-
-        self.paid = True
-        await interaction.channel.send("⏳ Paiement signalé. En attente validation staff.")
-        await interaction.response.defer()
-
-    @discord.ui.button(label="🔒 Confirmer paiement (Staff)", style=discord.ButtonStyle.primary)
-    async def confirm_staff(self, interaction: discord.Interaction, button: discord.ui.Button):
-
-        if not any(role.name in ["Manager", "Founders"] for role in interaction.user.roles):
-            await interaction.response.send_message("❌ Staff uniquement.", ephemeral=True)
-            return
-
-        if not self.paid:
-            await interaction.response.send_message("❌ Le client n'a pas encore payé.", ephemeral=True)
-            return
-
-        await interaction.channel.send("✅ Paiement confirmé. Commande lancée 🚀")
-        await interaction.response.defer()
-
-# =============================
-# QUANTITY BUTTON VIEW
-# =============================
-
-class QuantityButtonView(discord.ui.View):
-    def __init__(self, creator, service):
-        super().__init__(timeout=None)
-        self.creator = creator
         self.service = service
 
-    @discord.ui.button(label="✏️ Entrer la quantité", style=discord.ButtonStyle.primary)
-    async def open_modal(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(QuantityModal(self.service))
 
-        if interaction.user != self.creator:
-            await interaction.response.send_message("❌ Ce n'est pas ton ticket.", ephemeral=True)
-            return
 
-        await interaction.response.send_modal(
-            QuantityModal(self.creator, self.service)
+class CloseButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(
+            label="🔒 Fermer",
+            style=discord.ButtonStyle.danger
         )
 
-    @discord.ui.button(label="🔒 Fermer le ticket", style=discord.ButtonStyle.danger)
-    async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-
-        if not any(role.name in ["Manager", "Founders"] for role in interaction.user.roles):
-            await interaction.response.send_message("❌ Staff uniquement.", ephemeral=True)
-            return
-
-        await interaction.channel.send("🔒 Ticket fermé par le staff.")
+    async def callback(self, interaction: discord.Interaction):
         await interaction.channel.delete()
 
-# =============================
-# SERVICE SELECT
-# =============================
+
+class TicketView(discord.ui.View):
+    def __init__(self, service):
+        super().__init__(timeout=None)
+        self.add_item(QuantityButton(service))
+        self.add_item(CloseButton())
+
+
+# ==========================================
+# MENU PRINCIPAL SERVICES
+# ==========================================
 
 class MainServiceSelect(discord.ui.Select):
     def __init__(self):
         options = [
-            discord.SelectOption(label="Followers", emoji="👥"),
-            discord.SelectOption(label="Views", emoji="👀"),
-            discord.SelectOption(label="Likes", emoji="❤️"),
+            discord.SelectOption(label="Instagram Followers", emoji="📈"),
+            discord.SelectOption(label="Instagram Likes", emoji="❤️"),
+            discord.SelectOption(label="TikTok Views", emoji="🎬"),
         ]
-        super().__init__(placeholder="Choisis ton service...", options=options)
+
+        super().__init__(
+            placeholder="Choisis ton service...",
+            min_values=1,
+            max_values=1,
+            options=options
+        )
 
     async def callback(self, interaction: discord.Interaction):
-
         service = self.values[0]
 
-        data = load_data()
-        data["counter"] += 1
-        save_data(data)
-        ticket_number = data["counter"]
+        guild = interaction.guild
+        category = guild.get_channel(CATEGORY_ID)
 
-        category = discord.utils.get(interaction.guild.categories, name="🎫 Tickets")
-        if not category:
-            category = await interaction.guild.create_category("🎫 Tickets")
-
-        overwrites = {
-            interaction.guild.default_role: discord.PermissionOverwrite(read_messages=False),
-            interaction.user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-        }
-
-        channel = await interaction.guild.create_text_channel(
-            name=f"ticket-{ticket_number}",
-            category=category,
-            overwrites=overwrites
+        channel = await guild.create_text_channel(
+            name=f"ticket-{interaction.user.name}",
+            category=category
         )
 
         embed = discord.Embed(
-            title="🎫 SLAYZIX PREMIUM SERVICE",
+            title="🛒 Nouvelle Commande",
             description=(
-                f"👤 Client : {interaction.user.mention}\n"
-                f"📦 Service sélectionné : **{service}**\n\n"
-                "💎 Nous offrons :\n"
-                "• Livraison rapide et progressive\n"
-                "• Comptes de haute qualité\n"
-                "• Aucun mot de passe requis\n"
-                "• Support réactif 24/7\n\n"
+                f"👤 **Client :** {interaction.user.mention}\n"
+                f"📦 **Service choisi :** {service}\n\n"
+                "💎 **Ce que nous offrons :**\n"
+                "• Engagement premium\n"
+                "• Livraison rapide\n"
+                "• Support actif\n"
+                "• Service sécurisé\n"
+                "• Résultats garantis\n\n"
                 "Clique sur **Entrer la quantité** pour continuer."
             ),
-            color=discord.Color.blurple()
+            color=discord.Color.from_rgb(25, 25, 25)
         )
 
-        embed.set_footer(text=f"Ticket #{ticket_number} • Service sécurisé")
+        embed.set_image(url=BANNER_URL)
+        embed.set_footer(text="Elite Social Boost • Premium Services")
 
-        await channel.send(
-            embed=embed,
-            view=QuantityButtonView(interaction.user, service)
-        )
+        await channel.send(embed=embed, view=TicketView(service))
 
         await interaction.response.send_message(
-            f"✅ Ticket créé : {channel.mention}",
+            f"✅ Ton ticket a été créé : {channel.mention}",
             ephemeral=True
         )
+
 
 class MainView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(MainServiceSelect())
 
-# =============================
-# SHOP COMMAND
-# =============================
+
+# ==========================================
+# COMMANDE PANEL
+# ==========================================
 
 @bot.command()
-async def shop(ctx):
+@commands.has_permissions(administrator=True)
+async def panel(ctx):
     embed = discord.Embed(
-        title="💎 SLAYZIX PREMIUM SHOP",
+        title="🚀 Elite Social Boost",
         description=(
-            "Bienvenue dans notre boutique officielle.\n\n"
-            "🚀 Followers, Views & Likes haute qualité\n"
+            "🎯 **Nos Services Premium :**\n\n"
+            "📈 Instagram Followers\n"
+            "❤️ Instagram Likes\n"
+            "🎬 TikTok Views\n\n"
+            "💎 Haute qualité\n"
+            "⚡ Livraison rapide\n"
             "🔒 Paiement sécurisé\n"
-            "⚡ Livraison rapide\n\n"
-            "Sélectionne un service ci-dessous pour commencer."
+            "📊 Résultats garantis\n\n"
+            "Sélectionne un service ci-dessous pour ouvrir un ticket."
         ),
-        color=discord.Color.purple()
+        color=discord.Color.from_rgb(30, 30, 30)
     )
 
-    embed.set_footer(text="Qualité • Sécurité • Rapidité")
+    embed.set_image(url=BANNER_URL)
+    embed.set_footer(text="Elite Social Boost • Premium Services")
 
     await ctx.send(embed=embed, view=MainView())
+
+
+# ==========================================
+# READY EVENT
+# ==========================================
+
+@bot.event
+async def on_ready():
+    print(f"Connecté en tant que {bot.user}")
+    bot.add_view(MainView())
+
 
 bot.run(TOKEN)
