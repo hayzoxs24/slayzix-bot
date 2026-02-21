@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
 import os
+import json
 
 TOKEN = os.getenv("TOKEN")
 
@@ -11,17 +12,34 @@ intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 STAFF_ROLES = ["Manager", "Founders"]
+DATA_FILE = "ticket_data.json"
 
-ticket_counter = 0
+# ===============================
+# SAUVEGARDE COMPTEUR
+# ===============================
+
+def load_data():
+    if not os.path.exists(DATA_FILE):
+        with open(DATA_FILE, "w") as f:
+            json.dump({"counter": 0}, f)
+    with open(DATA_FILE, "r") as f:
+        return json.load(f)
+
+def save_data(data):
+    with open(DATA_FILE, "w") as f:
+        json.dump(data, f, indent=4)
+
+data = load_data()
 
 # ===============================
 # VIEW TICKET
 # ===============================
 
 class TicketView(discord.ui.View):
-    def __init__(self):
+    def __init__(self, creator_id):
         super().__init__(timeout=None)
         self.claimed_by = None
+        self.creator_id = creator_id
 
     @discord.ui.button(label="🔔 Réclamer", style=discord.ButtonStyle.success)
     async def claim_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -35,7 +53,7 @@ class TicketView(discord.ui.View):
 
         if self.claimed_by:
             await interaction.response.send_message(
-                f"❌ Ticket déjà réclamé par {self.claimed_by.mention}.",
+                f"❌ Déjà réclamé par {self.claimed_by.mention}.",
                 ephemeral=True
             )
             return
@@ -43,6 +61,29 @@ class TicketView(discord.ui.View):
         self.claimed_by = interaction.user
         button.disabled = True
         button.label = f"✅ Réclamé par {interaction.user.name}"
+
+        # 🔒 Retire l'écriture aux autres staff
+        for role_name in STAFF_ROLES:
+            role = discord.utils.get(interaction.guild.roles, name=role_name)
+            if role:
+                await interaction.channel.set_permissions(
+                    role,
+                    send_messages=False
+                )
+
+        # ✅ Donne écriture uniquement au staff qui claim
+        await interaction.channel.set_permissions(
+            interaction.user,
+            send_messages=True
+        )
+
+        # ✅ Créateur garde l'écriture
+        creator = interaction.guild.get_member(self.creator_id)
+        if creator:
+            await interaction.channel.set_permissions(
+                creator,
+                send_messages=True
+            )
 
         await interaction.message.edit(view=self)
 
@@ -74,20 +115,14 @@ class ShopView(discord.ui.View):
     @discord.ui.button(label="🌐 Réseaux Sociaux", style=discord.ButtonStyle.danger)
     async def open_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
 
-        global ticket_counter
-        ticket_counter += 1
+        # 🔢 Incrémente compteur permanent
+        data["counter"] += 1
+        save_data(data)
+
+        ticket_number = data["counter"]
 
         guild = interaction.guild
         user = interaction.user
-
-        # Vérifie si l'utilisateur a déjà un ticket
-        for channel in guild.text_channels:
-            if channel.name.startswith("ticket-") and user in channel.members:
-                await interaction.response.send_message(
-                    "❌ Tu as déjà un ticket ouvert.",
-                    ephemeral=True
-                )
-                return
 
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
@@ -95,7 +130,7 @@ class ShopView(discord.ui.View):
             guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True),
         }
 
-        # Ajoute permissions Manager & Founders
+        # Ajoute accès staff
         for role_name in STAFF_ROLES:
             role = discord.utils.get(guild.roles, name=role_name)
             if role:
@@ -105,12 +140,12 @@ class ShopView(discord.ui.View):
                 )
 
         channel = await guild.create_text_channel(
-            name=f"ticket-{ticket_counter:03}",
+            name=f"ticket-{ticket_number:03}",
             overwrites=overwrites
         )
 
         embed = discord.Embed(
-            title=f"🎫 Ticket #{ticket_counter:03}",
+            title=f"🎫 Ticket #{ticket_number:03}",
             description="Merci d’indiquer ce que tu souhaites commander.",
             color=discord.Color.green()
         )
@@ -118,7 +153,7 @@ class ShopView(discord.ui.View):
         await channel.send(
             content=f"{user.mention}",
             embed=embed,
-            view=TicketView()
+            view=TicketView(user.id)
         )
 
         await interaction.response.send_message(
@@ -177,7 +212,6 @@ Powered by Slayzix's Shop
 @bot.event
 async def on_ready():
     bot.add_view(ShopView())
-    bot.add_view(TicketView())
     print(f"✅ Connecté en tant que {bot.user}")
 
 # ===============================
