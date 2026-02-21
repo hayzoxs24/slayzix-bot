@@ -46,6 +46,17 @@ APPS_PRICES = {
     "Prime Video": 10.50
 }
 
+FOURNISSEUR_PRICES = {
+    "Réseaux Sociaux": 10.0,
+    "Discord": 10.0,
+    "Fortnite": 10.0,
+    "Roblox": 10.0,
+    "Valorant": 10.0,
+    "Rocket League": 10.0,
+    "Applications": 10.0,
+    "Tous les fournisseurs": 50.0
+}
+
 # ================= BOUTON FERMETURE =================
 
 class CloseTicketView(discord.ui.View):
@@ -518,6 +529,65 @@ class AppsView(discord.ui.View):
         super().__init__(timeout=None)
         self.add_item(AppsSelect())
 
+
+class FournisseurModal(discord.ui.Modal):
+
+    def __init__(self, service):
+        super().__init__(title="Accès Fournisseur")
+        self.service = service
+
+        self.details = discord.ui.TextInput(
+            label="Informations complémentaires",
+            style=discord.TextStyle.paragraph,
+            required=False,
+            placeholder="Ex: pseudo Discord, méthode de contact..."
+        )
+        self.add_item(self.details)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        price = FOURNISSEUR_PRICES[self.service]
+        description = (
+            f"📦 Service : **Accès Fournisseur — {self.service}**\n"
+            f"💰 Prix : **{price:.2f}€**\n"
+        )
+        if self.details.value:
+            description += f"📝 Infos : **{self.details.value}**\n"
+        description += (
+            f"\n💳 Paiement PayPal\n"
+            f"💬 Un vendeur reviendra vers toi rapidement"
+        )
+
+        await create_ticket(
+            interaction,
+            "🎫 Ticket Fournisseur",
+            description
+        )
+
+
+class FournisseurSelect(discord.ui.Select):
+
+    def __init__(self):
+        options = [
+            discord.SelectOption(label="Réseaux Sociaux", emoji="📱", description="Accès fournisseur — 10€"),
+            discord.SelectOption(label="Discord", emoji="💬", description="Accès fournisseur — 10€"),
+            discord.SelectOption(label="Fortnite", emoji="🎮", description="Accès fournisseur — 10€"),
+            discord.SelectOption(label="Roblox", emoji="🧱", description="Accès fournisseur — 10€"),
+            discord.SelectOption(label="Valorant", emoji="💠", description="Accès fournisseur — 10€"),
+            discord.SelectOption(label="Rocket League", emoji="🚗", description="Accès fournisseur — 10€"),
+            discord.SelectOption(label="Applications", emoji="📲", description="Accès fournisseur — 10€"),
+            discord.SelectOption(label="Tous les fournisseurs", emoji="🌟", description="Accès complet — 50€"),
+        ]
+        super().__init__(placeholder="Choisis ton accès fournisseur", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(FournisseurModal(self.values[0]))
+
+
+class FournisseurView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(FournisseurSelect())
+
 # ================= COMMANDES =================
 
 @bot.command()
@@ -634,6 +704,28 @@ async def app(ctx):
         color=discord.Color.blurple()
     )
     await ctx.send(embed=embed, view=AppsView())
+
+@bot.command()
+async def fourni(ctx):
+    embed = discord.Embed(
+        title="💎 SLAYZIX SHOP — Accès Fournisseur",
+        description=(
+            "📱 Réseaux Sociaux — 10€\n"
+            "💬 Discord — 10€\n"
+            "🎮 Fortnite — 10€\n"
+            "🧱 Roblox — 10€\n"
+            "💠 Valorant — 10€\n"
+            "🚗 Rocket League — 10€\n"
+            "📲 Applications — 10€\n"
+            "🌟 Tous les fournisseurs — 50€\n\n"
+            "💳 Paiement PayPal\n"
+            "🔒 Paiement sécurisé\n"
+            "💬 Support actif\n\n"
+            "👇 Sélectionne ton accès fournisseur"
+        ),
+        color=discord.Color.blurple()
+    )
+    await ctx.send(embed=embed, view=FournisseurView())
 
 # ================= START =================
 
