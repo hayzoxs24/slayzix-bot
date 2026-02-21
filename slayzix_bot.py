@@ -169,16 +169,11 @@ async def shop(ctx):
 
     await ctx.send(embed=embed, view=MainView())
 
-# ================= READY =================
-
-@bot.event
-async def on_ready():
-    print(f"✅ Connecté en tant que {bot.user}")
-    
 # ================= DISCORD =================    
 
-@bot.command()
-async def discord(ctx):
+@bot.command(name="discord")
+async def discord_services(ctx):
+
     embed = discord.Embed(
         title="💬 DISCORD SERVICES",
         description="Services rapides et sécurisés via PayPal 💳",
