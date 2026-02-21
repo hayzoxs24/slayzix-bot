@@ -7,7 +7,7 @@ import os
 
 TOKEN = os.getenv("TOKEN")
 
-BANNER_URL = "https://cdn.discordapp.com/attachments/1462275672503357705/1474580179153326332/IMG_6798.png?ex=699a5d4f&is=69990bcf&hm=b52804eedcfcc25698865a8b59a9d7ade23366dc0ad6cd90dda04679a38ebd53&"
+BANNER_URL = "https://cdn.discordapp.com/attachments/1474164824660377772/1474585067270574190/Make_the_neon_lights_flicker_slowly_the_stars_twinkle_and_add_a_slow_zoom_in._seed1858083023.mp4?ex=699a61dc&is=6999105c&hm=505cba568307d0976517fcab3a385166cc05d9a26c73dfe821adf315367e9e62&"
 
 PAYPAL_HAYZOXS = "https://paypal.me/HAYZOXS"      # <-- mets le vrai lien
 PAYPAL_SLAYZIX = "https://paypal.me/SLAYZIX"      # <-- mets le vrai lien
