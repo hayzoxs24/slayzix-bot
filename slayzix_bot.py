@@ -30,7 +30,7 @@ def save_data(data):
         json.dump(data, f, indent=4)
 
 # =============================
-# PRIX
+# PRICES
 # =============================
 
 PRICES = {
@@ -40,21 +40,36 @@ PRICES = {
 }
 
 # =============================
-# SHOP VIEW
+# MAIN SHOP VIEW (SERVICE MENU BEFORE TICKET)
 # =============================
 
-class ShopView(discord.ui.View):
+class MainServiceSelect(discord.ui.Select):
     def __init__(self):
-        super().__init__(timeout=None)
+        options = [
+            discord.SelectOption(label="Followers", emoji="👥"),
+            discord.SelectOption(label="Views", emoji="👀"),
+            discord.SelectOption(label="Likes", emoji="❤️"),
+        ]
 
-    @discord.ui.button(label="🎟 Créer un Ticket", style=discord.ButtonStyle.green)
-    async def create_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        super().__init__(
+            placeholder="Choisis ton service...",
+            options=options
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+
+        service = self.values[0]
 
         data = load_data()
         data["counter"] += 1
         save_data(data)
 
         ticket_number = data["counter"]
+
+        # Création catégorie auto
+        category = discord.utils.get(interaction.guild.categories, name="🎫 Tickets")
+        if not category:
+            category = await interaction.guild.create_category("🎫 Tickets")
 
         overwrites = {
             interaction.guild.default_role: discord.PermissionOverwrite(read_messages=False),
@@ -63,19 +78,25 @@ class ShopView(discord.ui.View):
 
         channel = await interaction.guild.create_text_channel(
             name=f"ticket-{ticket_number}",
+            category=category,
             overwrites=overwrites
         )
 
         embed = discord.Embed(
-            title=f"🎫 Ticket #{ticket_number}",
-            description="Sélectionne ton service 👇",
+            title="🎫 Nouveau Ticket",
+            description=(
+                f"👤 Client : {interaction.user.mention}\n"
+                f"📦 Service : **{service}**\n\n"
+                "Choisis maintenant la quantité 👇"
+            ),
             color=discord.Color.blurple()
         )
 
+        embed.set_footer(text=f"Ticket #{ticket_number} • SLAYZIX SHOP")
+
         await channel.send(
-            content=f"{interaction.user.mention} | @Manager @Founders",
             embed=embed,
-            view=ServiceSelectView(interaction.user)
+            view=QuantitySelectView(interaction.user, service)
         )
 
         await interaction.response.send_message(
@@ -83,41 +104,10 @@ class ShopView(discord.ui.View):
             ephemeral=True
         )
 
-# =============================
-# SERVICE SELECT
-# =============================
-
-class ServiceSelect(discord.ui.Select):
-    def __init__(self, creator):
-        self.creator = creator
-
-        options = [
-            discord.SelectOption(label="Followers"),
-            discord.SelectOption(label="Views"),
-            discord.SelectOption(label="Likes"),
-        ]
-
-        super().__init__(placeholder="Choisis le service...", options=options)
-
-    async def callback(self, interaction: discord.Interaction):
-
-        if interaction.user != self.creator:
-            await interaction.response.send_message("❌ Ce n'est pas ton ticket.", ephemeral=True)
-            return
-
-        service = self.values[0]
-
-        await interaction.channel.send(
-            f"📦 Service sélectionné : **{service}**\nChoisis maintenant la quantité 👇",
-            view=QuantitySelectView(self.creator, service)
-        )
-
-        await interaction.response.defer()
-
-class ServiceSelectView(discord.ui.View):
-    def __init__(self, creator):
+class MainView(discord.ui.View):
+    def __init__(self):
         super().__init__(timeout=None)
-        self.add_item(ServiceSelect(creator))
+        self.add_item(MainServiceSelect())
 
 # =============================
 # QUANTITY SELECT
@@ -148,12 +138,14 @@ class QuantitySelect(discord.ui.Select):
         embed = discord.Embed(
             title="🧾 Facture",
             description=(
-                f"🎯 Service : {self.service}\n"
-                f"📦 Quantité : {quantity}\n"
-                f"💰 Total : {total}€"
+                f"📦 Service : {self.service}\n"
+                f"🔢 Quantité : {quantity}\n"
+                f"💰 Total : **{total}€**"
             ),
             color=discord.Color.green()
         )
+
+        embed.set_footer(text="Procède au paiement via PayPal")
 
         await interaction.channel.send(
             embed=embed,
@@ -168,7 +160,7 @@ class QuantitySelectView(discord.ui.View):
         self.add_item(QuantitySelect(creator, service))
 
 # =============================
-# PAYMENT VIEW (FIXED)
+# PAYMENT VIEW
 # =============================
 
 class PaymentView(discord.ui.View):
@@ -177,7 +169,7 @@ class PaymentView(discord.ui.View):
         self.creator = creator
         self.paid = False
 
-        # Boutons PayPal (pas de decorator pour les link buttons)
+        # Boutons PayPal
         self.add_item(discord.ui.Button(
             label="💳 PayPal HayZoXs",
             style=discord.ButtonStyle.link,
@@ -185,7 +177,7 @@ class PaymentView(discord.ui.View):
         ))
 
         self.add_item(discord.ui.Button(
-            label="💳 PayPal Slayzix's",
+            label="💳 PayPal Slayzix",
             style=discord.ButtonStyle.link,
             url="https://www.paypal.me/SlayzixxBetter"
         ))
@@ -198,10 +190,10 @@ class PaymentView(discord.ui.View):
             return
 
         self.paid = True
-        await interaction.channel.send("💬 Le client indique avoir payé. En attente confirmation staff.")
+        await interaction.channel.send("⏳ Paiement signalé. En attente validation staff.")
         await interaction.response.defer()
 
-    @discord.ui.button(label="🔒 Confirmer paiement (Staff)", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="🔒 Confirmer paiement (Staff)", style=discord.ButtonStyle.primary)
     async def confirm_staff(self, interaction: discord.Interaction, button: discord.ui.Button):
 
         if not any(role.name in ["Manager", "Founders"] for role in interaction.user.roles):
@@ -209,29 +201,41 @@ class PaymentView(discord.ui.View):
             return
 
         if not self.paid:
-            await interaction.response.send_message(
-                "❌ Le client n'a pas encore cliqué sur 'J'ai payé'.",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ Le client n'a pas encore payé.", ephemeral=True)
             return
 
-        await interaction.channel.send("✅ Paiement confirmé par le staff. Commande en cours 🚀")
+        await interaction.channel.send("✅ Paiement confirmé. Commande lancée 🚀")
         await interaction.response.defer()
 
+    @discord.ui.button(label="🔒 Fermer le ticket", style=discord.ButtonStyle.danger)
+    async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+
+        if not any(role.name in ["Manager", "Founders"] for role in interaction.user.roles):
+            await interaction.response.send_message("❌ Staff uniquement.", ephemeral=True)
+            return
+
+        await interaction.channel.send("🔒 Ticket fermé.")
+        await interaction.channel.delete()
+
 # =============================
-# COMMAND SHOP
+# SHOP COMMAND
 # =============================
 
 @bot.command()
 async def shop(ctx):
 
     embed = discord.Embed(
-        title="💎 SLAYZIX SHOP",
-        description="Clique pour créer un ticket.",
+        title="💎 SLAYZIX PREMIUM SHOP",
+        description=(
+            "Bienvenue dans la boutique officielle.\n\n"
+            "📦 Sélectionne un service ci-dessous pour ouvrir un ticket."
+        ),
         color=discord.Color.purple()
     )
 
-    await ctx.send(embed=embed, view=ShopView())
+    embed.set_footer(text="Paiement sécurisé • Livraison rapide • Support 24/7")
+
+    await ctx.send(embed=embed, view=MainView())
 
 # =============================
 
