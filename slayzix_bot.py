@@ -7,10 +7,8 @@ import os
 
 TOKEN = os.getenv("TOKEN")
 
-BANNER_URL = "https://cdn.discordapp.com/attachments/1462275672503357705/1474580179153326332/IMG_6798.png?ex=699a5d4f&is=69990bcf&hm=b52804eedcfcc25698865a8b59a9d7ade23366dc0ad6cd90dda04679a38ebd53&27"
-
 PAYPAL_HAYZOXS = "https://paypal.me/HAYZOXS"      # <-- mets le vrai lien
-PAYPAL_SLAYZIX = "https://paypal.me/SLAYZIXbetter"      # <-- mets le vrai lien
+PAYPAL_SLAYZIX = "https://paypal.me/SLAYZIXxbetter"      # <-- mets le vrai lien
 
 PRICES = {
     "Followers": 2,
