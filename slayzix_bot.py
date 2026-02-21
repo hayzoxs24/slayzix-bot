@@ -236,4 +236,11 @@ async def discordpanel(ctx):
 
 # ================= START =================
 
-bot.run("YOUR_BOT_TOKEN")
+if __name__ == "__main__":
+    import os
+    TOKEN = os.getenv("TOKEN")
+    
+    if not TOKEN:
+        print("❌ TOKEN manquant dans les variables d'environnement.")
+    else:
+        bot.run(TOKEN)
