@@ -1,14 +1,16 @@
 import discord
 from discord.ext import commands
-from discord.ui import View, Select
+from discord.ui import View, Select, Button
 import os
 
-# =========================
-# CONFIG
-# =========================
+# ================= CONFIG =================
 
-TOKEN = os.getenv("TOKEN")  # <-- Met ton token dans variable d'environnement
+TOKEN = os.getenv("TOKEN")
+
 BANNER_URL = "https://cdn.discordapp.com/attachments/1462275672503357705/1474580179153326332/IMG_6798.png?ex=699a5d4f&is=69990bcf&hm=b52804eedcfcc25698865a8b59a9d7ade23366dc0ad6cd90dda04679a38ebd53&"
+
+PAYPAL_HAYZOXS = "https://paypal.me/HAYZOXS"      # <-- mets le vrai lien
+PAYPAL_SLAYZIX = "https://paypal.me/SLAYZIX"      # <-- mets le vrai lien
 
 PRICES = {
     "Followers": 2,
@@ -16,21 +18,16 @@ PRICES = {
     "Views": 1
 }
 
-# =========================
-# INTENTS
-# =========================
+# ================= INTENTS =================
 
 intents = discord.Intents.default()
-intents.guilds = True
+intents.message_content = True
 intents.members = True
-intents.message_content = True  # Important pour commandes
+intents.guilds = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-
-# =========================
-# SELECT SERVICE
-# =========================
+# ================= SERVICE SELECT =================
 
 class ServiceSelect(Select):
     def __init__(self):
@@ -42,8 +39,6 @@ class ServiceSelect(Select):
 
         super().__init__(
             placeholder="Choisis ton service TikTok...",
-            min_values=1,
-            max_values=1,
             options=options,
             custom_id="service_select"
         )
@@ -52,10 +47,7 @@ class ServiceSelect(Select):
         service = self.values[0]
         await interaction.response.send_modal(QuantityModal(service))
 
-
-# =========================
-# MODAL QUANTITÉ
-# =========================
+# ================= MODAL QUANTITÉ =================
 
 class QuantityModal(discord.ui.Modal, title="Quantité (multiple de 1000)"):
     def __init__(self, service):
@@ -103,9 +95,9 @@ class QuantityModal(discord.ui.Modal, title="Quantité (multiple de 1000)"):
                 f"🎯 Service : **{self.service}**\n"
                 f"📦 Quantité : **{qty}**\n"
                 f"💰 Prix : **{price}€**\n\n"
+                f"💳 Paiement via PayPal ci-dessous\n"
                 f"⚡ Livraison rapide\n"
-                f"🔒 100% sécurisé\n"
-                f"📈 Boost TikTok Premium"
+                f"🔒 100% sécurisé"
             ),
             color=discord.Color.purple()
         )
@@ -116,7 +108,7 @@ class QuantityModal(discord.ui.Modal, title="Quantité (multiple de 1000)"):
         await channel.send(
             content=interaction.user.mention,
             embed=embed,
-            view=CloseView()
+            view=TicketView()
         )
 
         await interaction.response.send_message(
@@ -124,14 +116,25 @@ class QuantityModal(discord.ui.Modal, title="Quantité (multiple de 1000)"):
             ephemeral=True
         )
 
+# ================= VIEW TICKET (PAYPAL + CLOSE) =================
 
-# =========================
-# BOUTON FERMER
-# =========================
-
-class CloseView(View):
+class TicketView(View):
     def __init__(self):
         super().__init__(timeout=None)
+
+        # Bouton PayPal HayZoXs
+        self.add_item(Button(
+            label="💳 PayPal HayZoXs",
+            style=discord.ButtonStyle.link,
+            url=PAYPAL_HAYZOXS
+        ))
+
+        # Bouton PayPal Slayzix's
+        self.add_item(Button(
+            label="💳 PayPal Slayzix's",
+            style=discord.ButtonStyle.link,
+            url=PAYPAL_SLAYZIX
+        ))
 
     @discord.ui.button(
         label="🔒 Fermer la commande",
@@ -141,34 +144,28 @@ class CloseView(View):
     async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.channel.delete()
 
-
-# =========================
-# VIEW PRINCIPALE
-# =========================
+# ================= MAIN VIEW =================
 
 class MainView(View):
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(ServiceSelect())
 
-
-# =========================
-# COMMANDE SHOP
-# =========================
+# ================= COMMANDE SHOP =================
 
 @bot.command()
 async def shop(ctx):
     embed = discord.Embed(
         title="💎 SLAYZIX SHOP — TikTok Boost",
         description=(
-            "🚀 **Boost Premium TikTok**\n\n"
+            "🚀 Boost Premium TikTok\n\n"
             "• Followers haute qualité\n"
             "• Likes instantanés\n"
             "• Views rapides\n\n"
             "📦 Quantité libre (multiple de 1000)\n"
             "⚡ Livraison rapide\n"
             "🔒 Sécurisé\n\n"
-            "👇 Choisis ton service ci-dessous"
+            "👇 Sélectionne ton service"
         ),
         color=discord.Color.purple()
     )
@@ -177,16 +174,12 @@ async def shop(ctx):
 
     await ctx.send(embed=embed, view=MainView())
 
-
-# =========================
-# READY
-# =========================
+# ================= READY =================
 
 @bot.event
 async def on_ready():
     bot.add_view(MainView())
-    bot.add_view(CloseView())
+    bot.add_view(TicketView())
     print(f"✅ Connecté en tant que {bot.user}")
-
 
 bot.run(TOKEN)
