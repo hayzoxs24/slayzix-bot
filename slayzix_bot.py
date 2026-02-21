@@ -1,9 +1,7 @@
 import discord
 from discord.ext import commands
-from discord.ui import View, Select, Button
+from discord.ui import View, Select
 import os
-
-# ================= CONFIG =================
 
 TOKEN = os.getenv("TOKEN")
 
@@ -26,8 +24,6 @@ DISCORD_PRICES = {
     "Nitro Basique (1 mois)": 2,
 }
 
-# ================= INTENTS =================
-
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
@@ -35,9 +31,9 @@ intents.guilds = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# =====================================================
-# ================= TIKTOK SYSTEM =====================
-# =====================================================
+# =========================
+# TIKTOK
+# =========================
 
 class TikTokSelect(Select):
     def __init__(self):
@@ -55,10 +51,10 @@ class TikTokSelect(Select):
 
     async def callback(self, interaction: discord.Interaction):
         service = self.values[0]
-        await interaction.response.send_modal(TikTokQuantityModal(service))
+        await interaction.response.send_modal(TikTokModal(service))
 
 
-class TikTokQuantityModal(discord.ui.Modal, title="Quantité (multiple de 1000)"):
+class TikTokModal(discord.ui.Modal, title="Quantité (multiple de 1000)"):
     def __init__(self, service):
         super().__init__()
         self.service = service
@@ -74,7 +70,7 @@ class TikTokQuantityModal(discord.ui.Modal, title="Quantité (multiple de 1000)"
             qty = int(self.quantity.value)
             if qty % 1000 != 0:
                 return await interaction.response.send_message(
-                    "❌ La quantité doit être un multiple de 1000.",
+                    "❌ Multiple de 1000 uniquement.",
                     ephemeral=True
                 )
         except:
@@ -84,12 +80,7 @@ class TikTokQuantityModal(discord.ui.Modal, title="Quantité (multiple de 1000)"
             )
 
         price = (qty / 1000) * PRICES_TIKTOK[self.service]
-
-        await create_ticket(
-            interaction,
-            f"TikTok • {self.service}",
-            f"🎯 Service : {self.service}\n📦 Quantité : {qty}\n💰 Prix : {price}€"
-        )
+        await create_ticket(interaction, f"TikTok • {self.service}", f"Quantité : {qty}\nPrix : {price}€")
 
 
 class TikTokView(View):
@@ -101,22 +92,16 @@ class TikTokView(View):
 @bot.command()
 async def shop(ctx):
     embed = discord.Embed(
-        title="💎 SLAYZIX SHOP — TikTok Boost",
-        description=(
-            "• Followers\n"
-            "• Likes\n"
-            "• Views\n\n"
-            "Quantité libre (multiple de 1000)"
-        ),
+        title="💎 TikTok Services",
+        description="Followers • Likes • Views\nQuantité multiple de 1000",
         color=discord.Color.purple()
     )
     embed.set_image(url=BANNER_URL)
-
     await ctx.send(embed=embed, view=TikTokView())
 
-# =====================================================
-# ================= DISCORD SYSTEM ====================
-# =====================================================
+# =========================
+# DISCORD
+# =========================
 
 class DiscordSelect(Select):
     def __init__(self):
@@ -137,12 +122,7 @@ class DiscordSelect(Select):
     async def callback(self, interaction: discord.Interaction):
         service = self.values[0]
         price = DISCORD_PRICES[service]
-
-        await create_ticket(
-            interaction,
-            f"Discord • {service}",
-            f"💬 Service : {service}\n💰 Prix : {price}€"
-        )
+        await create_ticket(interaction, f"Discord • {service}", f"Prix : {price}€")
 
 
 class DiscordView(View):
@@ -151,27 +131,18 @@ class DiscordView(View):
         self.add_item(DiscordSelect())
 
 
-@bot.command()
-async def discord(ctx):
+@bot.command(name="discord")
+async def discordshop(ctx):  # ⚠️ renommé ici
     embed = discord.Embed(
-        title="💬 DISCORD SERVICES",
-        description=(
-            "👥 Membres Discord\n"
-            "➤ 1 000 Membres en ligne — 4.50€\n"
-            "➤ 1 000 Membres hors-ligne — 4€\n\n"
-            "🚀 Boost Serveur x14 — 3€\n\n"
-            "🎁 Nitro\n"
-            "➤ Nitro (1 mois) — 3.50€\n"
-            "➤ Nitro Basique (1 mois) — 2€"
-        ),
+        title="💬 Discord Services",
+        description="Membres • Boost • Nitro",
         color=discord.Color.blurple()
     )
-
     await ctx.send(embed=embed, view=DiscordView())
 
-# =====================================================
-# ================= TICKET SYSTEM =====================
-# =====================================================
+# =========================
+# TICKET SYSTEM
+# =========================
 
 async def create_ticket(interaction, title, description):
     guild = interaction.guild
@@ -193,27 +164,18 @@ async def create_ticket(interaction, title, description):
         color=discord.Color.green()
     )
 
-    embed.set_footer(text="Paiement via PayPal")
-
     view = View(timeout=None)
+    view.add_item(discord.ui.Button(label="💳 PayPal HayZoXs", style=discord.ButtonStyle.link, url=PAYPAL_HAYZOXS))
+    view.add_item(discord.ui.Button(label="💳 PayPal Slayzix's", style=discord.ButtonStyle.link, url=PAYPAL_SLAYZIXbetter))
 
-    view.add_item(Button(label="💳 PayPal HayZoXs", style=discord.ButtonStyle.link, url=PAYPAL_HAYZOXS))
-    view.add_item(Button(label="💳 PayPal Slayzix's", style=discord.ButtonStyle.link, url=PAYPAL_SLAYZIXbetter))
-
-    @discord.ui.button(label="🔒 Fermer", style=discord.ButtonStyle.danger, custom_id="close_ticket_btn")
+    @discord.ui.button(label="🔒 Fermer", style=discord.ButtonStyle.danger, custom_id="close_btn")
     async def close(inter, button):
         await inter.channel.delete()
 
-    view.add_item(Button(label="🔒 Fermer", style=discord.ButtonStyle.danger, custom_id="close_ticket"))
-
     await channel.send(content=interaction.user.mention, embed=embed, view=view)
+    await interaction.response.send_message(f"✅ Ticket créé : {channel.mention}", ephemeral=True)
 
-    await interaction.response.send_message(
-        f"✅ Ticket créé : {channel.mention}",
-        ephemeral=True
-    )
-
-# =====================================================
+# =========================
 
 @bot.event
 async def on_ready():
