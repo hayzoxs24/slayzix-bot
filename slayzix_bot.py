@@ -40,7 +40,7 @@ PRICES = {
 }
 
 # =============================
-# CLOSE CONFIRMATION
+# CLOSE CONFIRM
 # =============================
 
 class CloseConfirmSelect(discord.ui.Select):
@@ -49,22 +49,14 @@ class CloseConfirmSelect(discord.ui.Select):
             discord.SelectOption(label="Confirmer la fermeture", emoji="✅"),
             discord.SelectOption(label="Annuler", emoji="❌")
         ]
-
-        super().__init__(
-            placeholder="Confirmer la fermeture du ticket ?",
-            options=options
-        )
+        super().__init__(placeholder="Confirmer la fermeture ?", options=options)
 
     async def callback(self, interaction: discord.Interaction):
-
         if self.values[0] == "Confirmer la fermeture":
             await interaction.channel.send("🔒 Ticket fermé.")
             await interaction.channel.delete()
         else:
-            await interaction.response.send_message(
-                "❌ Fermeture annulée.",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ Fermeture annulée.", ephemeral=True)
 
 class CloseConfirmView(discord.ui.View):
     def __init__(self):
@@ -79,7 +71,7 @@ class QuantityModal(discord.ui.Modal, title="Entrer la quantité"):
 
     quantity = discord.ui.TextInput(
         label="Quantité (multiple de 1000 uniquement)",
-        placeholder="Exemple: 1000, 2000, 3000...",
+        placeholder="1000, 2000, 3000...",
         required=True
     )
 
@@ -119,14 +111,29 @@ class QuantityModal(discord.ui.Modal, title="Entrer la quantité"):
             color=discord.Color.green()
         )
 
-        embed.set_footer(text="Procède au paiement via PayPal")
-
-        await interaction.channel.send(
-            embed=embed,
-            view=PaymentView(self.creator)
-        )
-
+        await interaction.channel.send(embed=embed, view=PaymentView(self.creator))
         await interaction.response.send_message("✅ Quantité validée.", ephemeral=True)
+
+# =============================
+# QUANTITY BUTTON VIEW
+# =============================
+
+class QuantityButtonView(discord.ui.View):
+    def __init__(self, creator, service):
+        super().__init__(timeout=None)
+        self.creator = creator
+        self.service = service
+
+    @discord.ui.button(label="✏️ Entrer la quantité", style=discord.ButtonStyle.primary)
+    async def open_modal(self, interaction: discord.Interaction, button: discord.ui.Button):
+
+        if interaction.user != self.creator:
+            await interaction.response.send_message("❌ Ce n'est pas ton ticket.", ephemeral=True)
+            return
+
+        await interaction.response.send_modal(
+            QuantityModal(self.creator, self.service)
+        )
 
 # =============================
 # PAYMENT VIEW
@@ -189,7 +196,7 @@ class PaymentView(discord.ui.View):
         )
 
 # =============================
-# SERVICE SELECT (BEFORE TICKET)
+# SERVICE SELECT
 # =============================
 
 class MainServiceSelect(discord.ui.Select):
@@ -199,11 +206,7 @@ class MainServiceSelect(discord.ui.Select):
             discord.SelectOption(label="Views", emoji="👀"),
             discord.SelectOption(label="Likes", emoji="❤️"),
         ]
-
-        super().__init__(
-            placeholder="Choisis ton service...",
-            options=options
-        )
+        super().__init__(placeholder="Choisis ton service...", options=options)
 
     async def callback(self, interaction: discord.Interaction):
 
@@ -212,7 +215,6 @@ class MainServiceSelect(discord.ui.Select):
         data = load_data()
         data["counter"] += 1
         save_data(data)
-
         ticket_number = data["counter"]
 
         category = discord.utils.get(interaction.guild.categories, name="🎫 Tickets")
@@ -232,30 +234,14 @@ class MainServiceSelect(discord.ui.Select):
 
         embed = discord.Embed(
             title="🎫 Nouveau Ticket",
-            description=(
-                f"👤 Client : {interaction.user.mention}\n"
-                f"📦 Service : **{service}**\n\n"
-                "Clique ci-dessous pour entrer la quantité."
-            ),
+            description=f"Service sélectionné : **{service}**\n\nClique pour entrer la quantité.",
             color=discord.Color.blurple()
         )
 
-        embed.set_footer(text=f"Ticket #{ticket_number} • SLAYZIX SHOP")
-
-        view = discord.ui.View(timeout=None)
-
-        @discord.ui.button(label="✏️ Entrer la quantité", style=discord.ButtonStyle.primary)
-        async def open_modal(interaction2: discord.Interaction, button):
-            if interaction2.user != interaction.user:
-                await interaction2.response.send_message("❌ Ce n'est pas ton ticket.", ephemeral=True)
-                return
-            await interaction2.response.send_modal(
-                QuantityModal(interaction.user, service)
-            )
-
-        view.add_item(open_modal)
-
-        await channel.send(embed=embed, view=view)
+        await channel.send(
+            embed=embed,
+            view=QuantityButtonView(interaction.user, service)
+        )
 
         await interaction.response.send_message(
             f"✅ Ticket créé : {channel.mention}",
@@ -273,20 +259,11 @@ class MainView(discord.ui.View):
 
 @bot.command()
 async def shop(ctx):
-
     embed = discord.Embed(
         title="💎 SLAYZIX PREMIUM SHOP",
-        description=(
-            "Bienvenue dans la boutique officielle.\n\n"
-            "📦 Sélectionne un service ci-dessous pour ouvrir un ticket."
-        ),
+        description="Sélectionne un service ci-dessous.",
         color=discord.Color.purple()
     )
-
-    embed.set_footer(text="Paiement sécurisé • Livraison rapide • Support 24/7")
-
     await ctx.send(embed=embed, view=MainView())
-
-# =============================
 
 bot.run(TOKEN)
