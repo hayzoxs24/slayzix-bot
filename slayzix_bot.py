@@ -7,15 +7,23 @@ import os
 
 TOKEN = os.getenv("TOKEN")
 
-BANNER_URL = "https://cdn.discordapp.com/attachments/1474164824660377772/1474585067270574190/Make_the_neon_lights_flicker_slowly_the_stars_twinkle_and_add_a_slow_zoom_in._seed1858083023.mp4?ex=699a61dc&is=6999105c&hm=505cba568307d0976517fcab3a385166cc05d9a26c73dfe821adf315367e9e62&"
+BANNER_URL = "https://cdn.discordapp.com/attachments/1462275672503357705/1474580179153326332/IMG_6798.png"
 
-PAYPAL_HAYZOXS = "https://paypal.me/HAYZOXS"      # <-- mets le vrai lien
-PAYPAL_SLAYZIX = "https://paypal.me/SLAYZIX"      # <-- mets le vrai lien
+PAYPAL_HAYZOXS = "https://paypal.me/HAYZOXS"
+PAYPAL_SLAYZIX = "https://paypal.me/SLAYZIXbetter"
 
-PRICES = {
+PRICES_TIKTOK = {
     "Followers": 2,
     "Likes": 1.5,
     "Views": 1
+}
+
+DISCORD_PRICES = {
+    "1000 Membres en ligne": 4.5,
+    "1000 Membres hors-ligne": 4,
+    "Boost Serveur x14": 3,
+    "Nitro (1 mois)": 3.5,
+    "Nitro Basique (1 mois)": 2,
 }
 
 # ================= INTENTS =================
@@ -27,29 +35,30 @@ intents.guilds = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# ================= SERVICE SELECT =================
+# =====================================================
+# ================= TIKTOK SYSTEM =====================
+# =====================================================
 
-class ServiceSelect(Select):
+class TikTokSelect(Select):
     def __init__(self):
         options = [
-            discord.SelectOption(label="Followers", description="Boost abonnés TikTok 🚀"),
-            discord.SelectOption(label="Likes", description="Augmente les likes ❤️"),
-            discord.SelectOption(label="Views", description="Augmente les vues 👀"),
+            discord.SelectOption(label="Followers"),
+            discord.SelectOption(label="Likes"),
+            discord.SelectOption(label="Views"),
         ]
 
         super().__init__(
             placeholder="Choisis ton service TikTok...",
             options=options,
-            custom_id="service_select"
+            custom_id="tiktok_select"
         )
 
     async def callback(self, interaction: discord.Interaction):
         service = self.values[0]
-        await interaction.response.send_modal(QuantityModal(service))
+        await interaction.response.send_modal(TikTokQuantityModal(service))
 
-# ================= MODAL QUANTITÉ =================
 
-class QuantityModal(discord.ui.Modal, title="Quantité (multiple de 1000)"):
+class TikTokQuantityModal(discord.ui.Modal, title="Quantité (multiple de 1000)"):
     def __init__(self, service):
         super().__init__()
         self.service = service
@@ -74,112 +83,142 @@ class QuantityModal(discord.ui.Modal, title="Quantité (multiple de 1000)"):
                 ephemeral=True
             )
 
-        price = (qty / 1000) * PRICES[self.service]
+        price = (qty / 1000) * PRICES_TIKTOK[self.service]
 
-        guild = interaction.guild
-
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(view_channel=False),
-            interaction.user: discord.PermissionOverwrite(view_channel=True),
-            guild.me: discord.PermissionOverwrite(view_channel=True)
-        }
-
-        channel = await guild.create_text_channel(
-            name=f"commande-{interaction.user.name}",
-            overwrites=overwrites
+        await create_ticket(
+            interaction,
+            f"TikTok • {self.service}",
+            f"🎯 Service : {self.service}\n📦 Quantité : {qty}\n💰 Prix : {price}€"
         )
 
-        embed = discord.Embed(
-            title="🧾 Facture Automatique",
-            description=(
-                f"🎯 Service : **{self.service}**\n"
-                f"📦 Quantité : **{qty}**\n"
-                f"💰 Prix : **{price}€**\n\n"
-                f"💳 Paiement via PayPal ci-dessous\n"
-                f"⚡ Livraison rapide\n"
-                f"🔒 100% sécurisé"
-            ),
-            color=discord.Color.purple()
-        )
 
-        embed.set_image(url=BANNER_URL)
-        embed.set_footer(text="Slayzix Shop • TikTok Services")
-
-        await channel.send(
-            content=interaction.user.mention,
-            embed=embed,
-            view=TicketView()
-        )
-
-        await interaction.response.send_message(
-            f"✅ Ticket créé : {channel.mention}",
-            ephemeral=True
-        )
-
-# ================= VIEW TICKET (PAYPAL + CLOSE) =================
-
-class TicketView(View):
+class TikTokView(View):
     def __init__(self):
         super().__init__(timeout=None)
+        self.add_item(TikTokSelect())
 
-        # Bouton PayPal HayZoXs
-        self.add_item(Button(
-            label="💳 PayPal HayZoXs",
-            style=discord.ButtonStyle.link,
-            url=PAYPAL_HAYZOXS
-        ))
-
-        # Bouton PayPal Slayzix's
-        self.add_item(Button(
-            label="💳 PayPal Slayzix's",
-            style=discord.ButtonStyle.link,
-            url=PAYPAL_SLAYZIX
-        ))
-
-    @discord.ui.button(
-        label="🔒 Fermer la commande",
-        style=discord.ButtonStyle.danger,
-        custom_id="close_ticket_button"
-    )
-    async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.channel.delete()
-
-# ================= MAIN VIEW =================
-
-class MainView(View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.add_item(ServiceSelect())
-
-# ================= COMMANDE SHOP =================
 
 @bot.command()
 async def shop(ctx):
     embed = discord.Embed(
         title="💎 SLAYZIX SHOP — TikTok Boost",
         description=(
-            "🚀 Boost Premium TikTok\n\n"
-            "• Followers haute qualité\n"
-            "• Likes instantanés\n"
-            "• Views rapides\n\n"
-            "📦 Quantité libre (multiple de 1000)\n"
-            "⚡ Livraison rapide\n"
-            "🔒 Sécurisé\n\n"
-            "👇 Sélectionne ton service"
+            "• Followers\n"
+            "• Likes\n"
+            "• Views\n\n"
+            "Quantité libre (multiple de 1000)"
         ),
         color=discord.Color.purple()
     )
-
     embed.set_image(url=BANNER_URL)
 
-    await ctx.send(embed=embed, view=MainView())
+    await ctx.send(embed=embed, view=TikTokView())
 
-# ================= READY =================
+# =====================================================
+# ================= DISCORD SYSTEM ====================
+# =====================================================
+
+class DiscordSelect(Select):
+    def __init__(self):
+        options = [
+            discord.SelectOption(label="1000 Membres en ligne"),
+            discord.SelectOption(label="1000 Membres hors-ligne"),
+            discord.SelectOption(label="Boost Serveur x14"),
+            discord.SelectOption(label="Nitro (1 mois)"),
+            discord.SelectOption(label="Nitro Basique (1 mois)"),
+        ]
+
+        super().__init__(
+            placeholder="Choisis ton service Discord...",
+            options=options,
+            custom_id="discord_select"
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        service = self.values[0]
+        price = DISCORD_PRICES[service]
+
+        await create_ticket(
+            interaction,
+            f"Discord • {service}",
+            f"💬 Service : {service}\n💰 Prix : {price}€"
+        )
+
+
+class DiscordView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(DiscordSelect())
+
+
+@bot.command()
+async def discord(ctx):
+    embed = discord.Embed(
+        title="💬 DISCORD SERVICES",
+        description=(
+            "👥 Membres Discord\n"
+            "➤ 1 000 Membres en ligne — 4.50€\n"
+            "➤ 1 000 Membres hors-ligne — 4€\n\n"
+            "🚀 Boost Serveur x14 — 3€\n\n"
+            "🎁 Nitro\n"
+            "➤ Nitro (1 mois) — 3.50€\n"
+            "➤ Nitro Basique (1 mois) — 2€"
+        ),
+        color=discord.Color.blurple()
+    )
+
+    await ctx.send(embed=embed, view=DiscordView())
+
+# =====================================================
+# ================= TICKET SYSTEM =====================
+# =====================================================
+
+async def create_ticket(interaction, title, description):
+    guild = interaction.guild
+
+    overwrites = {
+        guild.default_role: discord.PermissionOverwrite(view_channel=False),
+        interaction.user: discord.PermissionOverwrite(view_channel=True),
+        guild.me: discord.PermissionOverwrite(view_channel=True)
+    }
+
+    channel = await guild.create_text_channel(
+        name=f"commande-{interaction.user.name}",
+        overwrites=overwrites
+    )
+
+    embed = discord.Embed(
+        title="🧾 Facture",
+        description=description,
+        color=discord.Color.green()
+    )
+
+    embed.set_footer(text="Paiement via PayPal")
+
+    view = View(timeout=None)
+
+    view.add_item(Button(label="💳 PayPal HayZoXs", style=discord.ButtonStyle.link, url=PAYPAL_HAYZOXS))
+    view.add_item(Button(label="💳 PayPal Slayzix's", style=discord.ButtonStyle.link, url=PAYPAL_SLAYZIXbetter))
+
+    @discord.ui.button(label="🔒 Fermer", style=discord.ButtonStyle.danger, custom_id="close_ticket_btn")
+    async def close(inter, button):
+        await inter.channel.delete()
+
+    view.add_item(Button(label="🔒 Fermer", style=discord.ButtonStyle.danger, custom_id="close_ticket"))
+
+    await channel.send(content=interaction.user.mention, embed=embed, view=view)
+
+    await interaction.response.send_message(
+        f"✅ Ticket créé : {channel.mention}",
+        ephemeral=True
+    )
+
+# =====================================================
 
 @bot.event
 async def on_ready():
-    bot.add_view(MainView())
-    bot.add_view(TicketView())
+    bot.add_view(TikTokView())
+    bot.add_view(DiscordView())
     print(f"✅ Connecté en tant que {bot.user}")
 
 bot.run(TOKEN)
