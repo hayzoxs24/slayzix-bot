@@ -1,26 +1,22 @@
 import discord
 from discord.ext import commands
-from discord.ui import View, Select, Button
-import os
 
-# ================= CONFIG =================
+intents = discord.Intents.all()
+bot = commands.Bot(command_prefix="!", intents=intents)
 
-TOKEN = os.getenv("TOKEN")
-
-PAYPAL_HAYZOXS = "https://paypal.me/HAYZOXS"
-PAYPAL_SLAYZIX = "https://paypal.me/SLAYZIXxbetter"
+# ================= PRIX =================
 
 TIKTOK_PRICES = {
-    "Followers": 2,
-    "Likes": 1.5,
-    "Views": 1
+    "Followers": 3.5,   # prix pour 1000
+    "Likes": 2.5,       # prix pour 1000
+    "Views": 1.5        # prix pour 1000
 }
 
 DISCORD_PRICES = {
-    "Membres en ligne": 4.5,
-    "Membres hors-ligne": 4,
-    "Boost x14": 3,
-    "Nitro 1 mois": 3.5
+    "Membres en ligne": 4.5,      # prix pour 1000
+    "Membres hors-ligne": 4,      # prix pour 1000
+    "Boost x14": 3,               # prix unité
+    "Nitro 1 mois": 3.5           # prix unité
 }
 
 DECORATION_PRICES = {
@@ -33,175 +29,59 @@ DECORATION_PRICES = {
     11.99: 3.95
 }
 
-# ================= INTENTS =================
+# ================= TICKET =================
 
-intents = discord.Intents.default()
-intents.message_content = True
-intents.members = True
-intents.guilds = True
-
-bot = commands.Bot(command_prefix="!", intents=intents)
-
-# =====================================================
-# ================= TICKET SYSTEM =====================
-# =====================================================
-
-class TicketView(View):
-    def __init__(self):
-        super().__init__(timeout=None)
-
-        self.add_item(Button(label="💳 PayPal HayZoXs",
-                             style=discord.ButtonStyle.link,
-                             url=PAYPAL_HAYZOXS))
-
-        self.add_item(Button(label="💳 PayPal Slayzix's",
-                             style=discord.ButtonStyle.link,
-                             url=PAYPAL_SLAYZIX))
-
-    @discord.ui.button(label="🔒 Fermer",
-                       style=discord.ButtonStyle.danger,
-                       custom_id="close_ticket")
-    async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.channel.delete()
-
-
-async def create_ticket(interaction, title, description, color, footer):
-
+async def create_ticket(interaction, title, description):
     guild = interaction.guild
+    user = interaction.user
+
+    # Anti double ticket
+    existing = discord.utils.get(guild.text_channels, name=f"ticket-{user.name.lower()}")
+    if existing:
+        return await interaction.response.send_message(
+            "❌ Tu as déjà un ticket ouvert.",
+            ephemeral=True
+        )
 
     overwrites = {
-        guild.default_role: discord.PermissionOverwrite(view_channel=False),
-        interaction.user: discord.PermissionOverwrite(view_channel=True),
-        guild.me: discord.PermissionOverwrite(view_channel=True)
+        guild.default_role: discord.PermissionOverwrite(read_messages=False),
+        user: discord.PermissionOverwrite(read_messages=True, send_messages=True)
     }
 
-    category = discord.utils.get(guild.categories, name="🎫 COMMANDES")
+    category = discord.utils.get(guild.categories, name="TICKETS")
     if not category:
-        category = await guild.create_category("🎫 COMMANDES")
+        category = await guild.create_category("TICKETS")
 
     channel = await guild.create_text_channel(
-        name=f"ticket-{interaction.user.name}".replace(" ", "-").lower(),
+        name=f"ticket-{user.name}",
         overwrites=overwrites,
         category=category
     )
 
-    embed = discord.Embed(title=title,
-                          description=description,
-                          color=color)
-
-    embed.set_footer(text=footer)
-
-    await channel.send(content=interaction.user.mention,
-                       embed=embed,
-                       view=TicketView())
-
-    await interaction.response.send_message(
-        f"✅ Ticket créé : {channel.mention}",
-        ephemeral=True
+    embed = discord.Embed(
+        title=title,
+        description=description,
+        color=discord.Color.blurple()
     )
+    embed.set_footer(text="Slayzix Shop")
 
-# =====================================================
-# ================= TIKTOK PANEL ======================
-# =====================================================
+    await channel.send(f"{user.mention}", embed=embed)
+    await interaction.response.send_message("✅ Ticket créé !", ephemeral=True)
 
-class TikTokSelect(Select):
-    def __init__(self):
-        options = [
-            discord.SelectOption(label="Followers", emoji="🚀"),
-            discord.SelectOption(label="Likes", emoji="❤️"),
-            discord.SelectOption(label="Views", emoji="👀"),
-        ]
+# ================= MODAL =================
 
-        super().__init__(placeholder="Choisis ton service",
-                         options=options)
+class QuantityModal(discord.ui.Modal):
 
-    async def callback(self, interaction: discord.Interaction):
-        await interaction.response.send_modal(
-            TikTokModal(self.values[0])
-        )
-
-
-class TikTokModal(discord.ui.Modal, title="Quantité (multiple de 1000)"):
-
-    def __init__(self, service):
-        super().__init__()
+    def __init__(self, service, platform):
+        super().__init__(title="Commande")
         self.service = service
+        self.platform = platform
 
         self.quantity = discord.ui.TextInput(
-            label="Ex: 1000, 2000, 3000...",
+            label="Quantité (ou prix original decoration)",
             required=True
         )
-        self.add_item(self.quantity)
 
-    async def on_submit(self, interaction: discord.Interaction):
-
-        try:
-            qty = int(self.quantity.value)
-
-            if qty < 1000 or qty % 1000 != 0:
-                return await interaction.response.send_message(
-                    "❌ Minimum 1000 et multiple de 1000 requis.",
-                    ephemeral=True
-                )
-
-            price = (qty / 1000) * TIKTOK_PRICES[self.service]
-
-        except:
-            return await interaction.response.send_message(
-                "❌ Nombre invalide.",
-                ephemeral=True
-            )
-
-        await create_ticket(
-            interaction,
-            "🧾 Facture TikTok",
-            f"📦 Service : **{self.service}**\n"
-            f"🔢 Quantité : **{qty}**\n"
-            f"💰 Prix : **{price:.2f}€**\n\n"
-            "⚡ Livraison -24h\n💳 Paiement PayPal",
-            discord.Color.purple(),
-            "Slayzix Shop • TikTok"
-        )
-
-
-class TikTokView(View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.add_item(TikTokSelect())
-
-# =====================================================
-# ================= DISCORD PANEL =====================
-# =====================================================
-
-class DiscordSelect(Select):
-    def __init__(self):
-        options = [
-            discord.SelectOption(label="Membres en ligne", emoji="👥"),
-            discord.SelectOption(label="Membres hors-ligne", emoji="👤"),
-            discord.SelectOption(label="Boost x14", emoji="🚀"),
-            discord.SelectOption(label="Nitro 1 mois", emoji="🎁"),
-            discord.SelectOption(label="Profile Decoration", emoji="🎨"),
-        ]
-
-        super().__init__(placeholder="Choisis ton service Discord",
-                         options=options)
-
-    async def callback(self, interaction: discord.Interaction):
-        await interaction.response.send_modal(
-            DiscordModal(self.values[0])
-        )
-
-
-class DiscordModal(discord.ui.Modal, title="Commande Discord"):
-
-    def __init__(self, service):
-        super().__init__()
-        self.service = service
-
-        self.quantity = discord.ui.TextInput(
-            label="Quantité (ou prix original pour decoration)",
-            required=True
-        )
         self.add_item(self.quantity)
 
     async def on_submit(self, interaction: discord.Interaction):
@@ -209,34 +89,50 @@ class DiscordModal(discord.ui.Modal, title="Commande Discord"):
         try:
             value = float(self.quantity.value)
 
-            # MEMBRES
-            if "Membres" in self.service:
+            # ================= TIKTOK =================
+            if self.platform == "tiktok":
                 qty = int(value)
 
                 if qty < 1000 or qty % 1000 != 0:
                     return await interaction.response.send_message(
-                        "❌ Minimum 1000 et multiple de 1000 requis.",
+                        "❌ Minimum 1000 et multiple de 1000.",
                         ephemeral=True
                     )
 
-                price = (qty / 1000) * DISCORD_PRICES[self.service]
+                price = (qty / 1000) * TIKTOK_PRICES[self.service]
 
-            # BOOST / NITRO
-            elif self.service in ["Boost x14", "Nitro 1 mois"]:
-                qty = int(value)
-                price = qty * DISCORD_PRICES[self.service]
+            # ================= DISCORD =================
+            else:
 
-            # DECORATION
-            elif self.service == "Profile Decoration":
+                # Membres
+                if "Membres" in self.service:
+                    qty = int(value)
 
-                if value not in DECORATION_PRICES:
-                    return await interaction.response.send_message(
-                        "❌ Prix invalide.\nExemple : 4.99, 5.99, 6.99...",
-                        ephemeral=True
-                    )
+                    if qty < 1000 or qty % 1000 != 0:
+                        return await interaction.response.send_message(
+                            "❌ Minimum 1000 et multiple de 1000.",
+                            ephemeral=True
+                        )
 
-                qty = 1
-                price = DECORATION_PRICES[value]
+                    price = (qty / 1000) * DISCORD_PRICES[self.service]
+
+                # Boost / Nitro
+                elif self.service in ["Boost x14", "Nitro 1 mois"]:
+                    qty = int(value)
+                    price = qty * DISCORD_PRICES[self.service]
+
+                # Decoration
+                else:
+                    original_price = float(value)
+
+                    if original_price not in DECORATION_PRICES:
+                        return await interaction.response.send_message(
+                            "❌ Prix invalide (ex: 4.99, 5.99...).",
+                            ephemeral=True
+                        )
+
+                    qty = 1
+                    price = DECORATION_PRICES[original_price]
 
         except:
             return await interaction.response.send_message(
@@ -246,52 +142,98 @@ class DiscordModal(discord.ui.Modal, title="Commande Discord"):
 
         await create_ticket(
             interaction,
-            "🎫 Facture Discord",
+            "🎫 Facture",
             f"📦 Service : **{self.service}**\n"
             f"🔢 Quantité : **{qty}**\n"
             f"💰 Prix : **{price:.2f}€**\n\n"
-            "💳 Paiement PayPal\n⚡ Livraison rapide",
-            discord.Color.blurple(),
-            "Slayzix Shop • Discord"
+            f"💳 Paiement PayPal\n"
+            f"⚡ Livraison rapide\n"
+            f"💬 Merci de patienter"
         )
 
+# ================= SELECT =================
 
-class DiscordView(View):
-    def __init__(self):
+class ServiceSelect(discord.ui.Select):
+
+    def __init__(self, platform):
+
+        if platform == "tiktok":
+            options = [
+                discord.SelectOption(label="Followers", emoji="🚀"),
+                discord.SelectOption(label="Likes", emoji="❤️"),
+                discord.SelectOption(label="Views", emoji="👀"),
+            ]
+        else:
+            options = [
+                discord.SelectOption(label="Membres en ligne", emoji="👥"),
+                discord.SelectOption(label="Membres hors-ligne", emoji="👤"),
+                discord.SelectOption(label="Boost x14", emoji="🚀"),
+                discord.SelectOption(label="Nitro 1 mois", emoji="🎁"),
+                discord.SelectOption(label="Profile Decoration", emoji="🎨"),
+            ]
+
+        super().__init__(
+            placeholder="Choisis ton service",
+            options=options
+        )
+
+        self.platform = platform
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(
+            QuantityModal(self.values[0], self.platform)
+        )
+
+class ServiceView(discord.ui.View):
+    def __init__(self, platform):
         super().__init__(timeout=None)
-        self.add_item(DiscordSelect())
+        self.add_item(ServiceSelect(platform))
 
-# =====================================================
-# ================= COMMANDES =========================
-# =====================================================
+# ================= COMMANDES =================
 
 @bot.command()
-async def shop(ctx):
+async def tiktok(ctx):
 
     embed = discord.Embed(
         title="💎 SLAYZIX SHOP — TikTok Boost",
-        description="Sélectionne ton service 👇",
-        color=discord.Color.purple()
-    )
-
-    await ctx.send(embed=embed, view=TikTokView())
-
-
-@bot.command(name="discord")
-async def discordpanel(ctx):
-
-    embed = discord.Embed(
-        title="💎 SLAYZIX SHOP — Discord Boost",
-        description="Sélectionne ton service 👇",
+        description=(
+            "🚀 Followers haute qualité\n"
+            "❤️ Likes instantanés\n"
+            "👀 Views rapides\n\n"
+            "⚡ Livraison en moins de 24h\n"
+            "🔒 Paiement sécurisé\n"
+            "💬 Support actif\n\n"
+            "👇 Sélectionne ton service"
+        ),
         color=discord.Color.blurple()
     )
 
-    await ctx.send(embed=embed, view=DiscordView())
+    embed.set_footer(text="Slayzix Shop • TikTok Services")
 
+    await ctx.send(embed=embed, view=ServiceView("tiktok"))
 
-@bot.event
-async def on_ready():
-    print(f"✅ Connecté en tant que {bot.user}")
+@bot.command()
+async def discordpanel(ctx):
 
+    embed = discord.Embed(
+        title="💎 SLAYZIX SHOP — Discord Services",
+        description=(
+            "👥 Membres haute qualité\n"
+            "🚀 Boost rapides\n"
+            "🎁 Nitro instantané\n"
+            "🎨 Profile Decorations\n\n"
+            "⚡ Livraison rapide\n"
+            "🔒 Paiement sécurisé\n"
+            "💬 Support actif\n\n"
+            "👇 Sélectionne ton service"
+        ),
+        color=discord.Color.blurple()
+    )
 
-bot.run(TOKEN)
+    embed.set_footer(text="Slayzix Shop • Discord Services")
+
+    await ctx.send(embed=embed, view=ServiceView("discord"))
+
+# ================= START =================
+
+bot.run("YOUR_BOT_TOKEN")
