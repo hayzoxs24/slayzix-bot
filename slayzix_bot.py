@@ -39,6 +39,13 @@ ROCKETLEAGUE_PRICES = {
     "Comptes Rocket League": None
 }
 
+APPS_PRICES = {
+    "ChatGPT Plus": 13.0,
+    "YouTube Premium": 8.0,
+    "Spotify Premium": 13.0,
+    "Prime Video": 10.50
+}
+
 # ================= BOUTON FERMETURE =================
 
 class CloseTicketView(discord.ui.View):
@@ -450,6 +457,67 @@ class RocketLeagueView(discord.ui.View):
         super().__init__(timeout=None)
         self.add_item(RocketLeagueSelect())
 
+
+class AppsModal(discord.ui.Modal):
+
+    def __init__(self, service):
+        super().__init__(title="Commande Application")
+        self.service = service
+
+        self.quantity = discord.ui.TextInput(
+            label="Quantité",
+            required=True,
+            placeholder="Ex: 1"
+        )
+        self.add_item(self.quantity)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            value = int(self.quantity.value)
+            if value < 1:
+                return await interaction.response.send_message(
+                    "❌ Quantité invalide.",
+                    ephemeral=True
+                )
+            price = value * APPS_PRICES[self.service]
+        except ValueError:
+            return await interaction.response.send_message(
+                "❌ Valeur invalide. Entre un nombre entier.",
+                ephemeral=True
+            )
+
+        await create_ticket(
+            interaction,
+            "🎫 Ticket Applications",
+            f"📦 Service : **{self.service} (Lifetime)**\n"
+            f"🔢 Quantité : **{value}**\n"
+            f"💰 Prix : **{price:.2f}€**\n\n"
+            f"💳 Paiement PayPal\n"
+            f"⚡ Livraison rapide\n"
+            f"💬 Merci de patienter"
+        )
+
+
+class AppsSelect(discord.ui.Select):
+
+    def __init__(self):
+        options = [
+            discord.SelectOption(label="ChatGPT Plus", emoji="🤖", description="Lifetime — 13€"),
+            discord.SelectOption(label="YouTube Premium", emoji="▶️", description="Lifetime — 8€"),
+            discord.SelectOption(label="Spotify Premium", emoji="🎵", description="Lifetime — 13€"),
+            discord.SelectOption(label="Prime Video", emoji="📺", description="Lifetime — 10.50€"),
+        ]
+        super().__init__(placeholder="Choisis ton application", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(AppsModal(self.values[0]))
+
+
+class AppsView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(AppsSelect())
+
 # ================= COMMANDES =================
 
 @bot.command()
@@ -548,6 +616,24 @@ async def rocket(ctx):
         color=discord.Color.blurple()
     )
     await ctx.send(embed=embed, view=RocketLeagueView())
+
+@bot.command()
+async def app(ctx):
+    embed = discord.Embed(
+        title="💎 SLAYZIX SHOP — Applications Services",
+        description=(
+            "🤖 ChatGPT Plus (Lifetime) — 13€\n"
+            "▶️ YouTube Premium (Lifetime) — 8€\n"
+            "🎵 Spotify Premium (Lifetime) — 13€\n"
+            "📺 Prime Video (Lifetime) — 10.50€\n\n"
+            "💳 Paiement PayPal\n"
+            "🔒 Paiement sécurisé\n"
+            "💬 Support actif\n\n"
+            "👇 Sélectionne ton application"
+        ),
+        color=discord.Color.blurple()
+    )
+    await ctx.send(embed=embed, view=AppsView())
 
 # ================= START =================
 
