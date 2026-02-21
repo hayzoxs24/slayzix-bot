@@ -14,6 +14,14 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 STAFF_ROLES = ["Manager", "Founders"]
 DATA_FILE = "ticket_data.json"
 
+PRICES = {
+    "Followers TikTok": 2.50,
+    "Views TikTok": 0.15,
+    "Likes TikTok": 1.00,
+}
+
+bot.active_tickets = {}
+
 # ===============================
 # SAVE SYSTEM
 # ===============================
@@ -57,7 +65,7 @@ class TicketView(discord.ui.View):
         button.label = f"✅ {interaction.user.name}"
         button.disabled = True
 
-        # Bloque écriture aux autres staff
+        # Bloque écriture autres staff
         for role_name in STAFF_ROLES:
             role = discord.utils.get(interaction.guild.roles, name=role_name)
             if role:
@@ -83,19 +91,19 @@ class TicketView(discord.ui.View):
             return await interaction.response.send_message("❌ Accès refusé.", ephemeral=True)
 
         await interaction.response.send_message("🔒 Fermeture...")
+        bot.active_tickets.pop(interaction.channel.id, None)
         await interaction.channel.delete()
 
 # ===============================
-# SERVICE SELECT MENU
+# SELECT MENU
 # ===============================
 
 class ServiceSelect(discord.ui.Select):
     def __init__(self):
         options = [
-            discord.SelectOption(label="Followers TikTok", emoji="👥", description="Augmente tes abonnés TikTok"),
-            discord.SelectOption(label="Followers Instagram", emoji="📸", description="Boost Instagram"),
-            discord.SelectOption(label="Views TikTok", emoji="👀", description="Augmente tes vues"),
-            discord.SelectOption(label="Likes TikTok", emoji="❤️", description="Boost tes likes"),
+            discord.SelectOption(label="Followers TikTok", emoji="👥"),
+            discord.SelectOption(label="Views TikTok", emoji="👀"),
+            discord.SelectOption(label="Likes TikTok", emoji="❤️"),
         ]
 
         super().__init__(
@@ -131,25 +139,27 @@ class ServiceSelect(discord.ui.Select):
             overwrites=overwrites
         )
 
+        bot.active_tickets[channel.id] = {
+            "service": service,
+            "user_id": user.id
+        }
+
         embed = discord.Embed(
-            title=f"🎫 𝗧𝗜𝗖𝗞𝗘𝗧 #{ticket_number:03}",
+            title=f"🎫 TICKET #{ticket_number:03}",
             description=f"""
 ━━━━━━━━━━━━━━━━━━━━━━
 👤 Client : {user.mention}
+🛒 Service : **{service}**
 
-🛒 Service choisi :
-> **{service}**
-
-💬 Indique la quantité souhaitée.
-
-⏳ Temps moyen : 5-15 min
+✍️ Écris la quantité souhaitée.
+(ex: 5000)
 ━━━━━━━━━━━━━━━━━━━━━━
 """,
-            color=0x00ff99
+            color=discord.Color.blurple()
         )
 
         embed.set_thumbnail(url=user.display_avatar.url)
-        embed.set_footer(text="Slayzix Premium Support")
+        embed.set_footer(text="Slayzix Premium System")
 
         await channel.send(
             content=user.mention,
@@ -168,6 +178,55 @@ class ShopView(discord.ui.View):
         self.add_item(ServiceSelect())
 
 # ===============================
+# AUTO INVOICE SYSTEM
+# ===============================
+
+@bot.event
+async def on_message(message):
+
+    if message.author.bot:
+        return
+
+    if message.channel.id in bot.active_tickets:
+
+        ticket_data = bot.active_tickets[message.channel.id]
+        service = ticket_data["service"]
+
+        if message.content.isdigit():
+
+            quantity = int(message.content)
+
+            if quantity < 100:
+                await message.channel.send("❌ Minimum 100.")
+                return
+
+            price_per_1000 = PRICES[service]
+            total_price = round((quantity / 1000) * price_per_1000, 2)
+
+            # 🎨 Dégradé dynamique
+            r = (quantity * 3) % 255
+            g = (quantity * 7) % 255
+            b = (quantity * 11) % 255
+
+            invoice = discord.Embed(
+                title="🧾 FACTURE AUTOMATIQUE",
+                description=f"""
+━━━━━━━━━━━━━━━━━━━━━━
+🛒 Service : **{service}**
+📦 Quantité : **{quantity}**
+💰 Total : **{total_price}€**
+━━━━━━━━━━━━━━━━━━━━━━
+""",
+                color=discord.Color.from_rgb(r, g, b)
+            )
+
+            invoice.set_footer(text="Slayzix Premium Billing")
+
+            await message.channel.send(embed=invoice)
+
+    await bot.process_commands(message)
+
+# ===============================
 # SHOP COMMAND
 # ===============================
 
@@ -175,19 +234,17 @@ class ShopView(discord.ui.View):
 async def shop(ctx):
 
     embed = discord.Embed(
-        title="💎 𝗦𝗟𝗔𝗬𝗭𝗜𝗫 𝗣𝗥𝗘𝗠𝗜𝗨𝗠 𝗦𝗛𝗢𝗣",
+        title="💎 SLAYZIX PREMIUM SHOP",
         description="""
 ━━━━━━━━━━━━━━━━━━━━━━
-✨ Boost Réseaux Sociaux ✨
-━━━━━━━━━━━━━━━━━━━━━━
-
-👥 Followers  
-👀 Views  
-❤️ Likes  
+👥 Followers TikTok  
+👀 Views TikTok  
+❤️ Likes TikTok  
 
 💳 Paiement : Paypal
 
-Clique ci-dessous pour commander.
+Sélectionne ton service ci-dessous.
+━━━━━━━━━━━━━━━━━━━━━━
 """,
         color=0x2b2d31
     )
