@@ -3,24 +3,20 @@ from discord.ext import commands
 import json
 import os
 
-# ==============================
-# CONFIG
-# ==============================
-
-TOKEN = os.getenv("TOKEN")  # NE PAS mettre le token ici
+TOKEN = os.getenv("TOKEN")
 
 if not TOKEN:
-    print("❌ TOKEN manquant dans les variables d'environnement.")
+    print("TOKEN manquant.")
     exit()
-
-TICKET_FILE = "tickets.json"
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# ==============================
-# SAVE SYSTEM (COMPTEUR PERMANENT)
-# ==============================
+TICKET_FILE = "tickets.json"
+
+# =============================
+# SAVE SYSTEM
+# =============================
 
 def load_data():
     if not os.path.exists(TICKET_FILE):
@@ -33,26 +29,26 @@ def save_data(data):
     with open(TICKET_FILE, "w") as f:
         json.dump(data, f, indent=4)
 
-# ==============================
-# PRIX UNITAIRES
-# ==============================
+# =============================
+# PRIX
+# =============================
 
 PRICES = {
-    "followers": 0.0025,
-    "views": 0.00015,
-    "likes": 0.001
+    "Followers": 0.0025,
+    "Views": 0.00015,
+    "Likes": 0.001
 }
 
-# ==============================
+# =============================
 # SHOP VIEW
-# ==============================
+# =============================
 
 class ShopView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="🎟 Ouvrir un Ticket", style=discord.ButtonStyle.green)
-    async def open_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(label="🎟 Créer un Ticket", style=discord.ButtonStyle.green)
+    async def create_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
 
         data = load_data()
         data["counter"] += 1
@@ -72,20 +68,14 @@ class ShopView(discord.ui.View):
 
         embed = discord.Embed(
             title=f"🎫 Ticket #{ticket_number}",
-            description=(
-                "📌 Écris ton service + quantité\n\n"
-                "Exemple:\n"
-                "`followers 5000`\n"
-                "`views 10000`\n"
-                "`likes 2000`"
-            ),
+            description="Sélectionne ton service 👇",
             color=discord.Color.blurple()
         )
 
         await channel.send(
-            content="@Manager @Founders",
+            content=f"{interaction.user.mention} | @Manager @Founders",
             embed=embed,
-            view=TicketView(interaction.user)
+            view=ServiceSelectView(interaction.user)
         )
 
         await interaction.response.send_message(
@@ -93,137 +83,149 @@ class ShopView(discord.ui.View):
             ephemeral=True
         )
 
-# ==============================
-# TICKET VIEW
-# ==============================
+# =============================
+# SERVICE SELECT
+# =============================
 
-class TicketView(discord.ui.View):
+class ServiceSelect(discord.ui.Select):
     def __init__(self, creator):
-        super().__init__(timeout=None)
         self.creator = creator
-        self.claimer = None
 
-    @discord.ui.button(label="📌 Claim", style=discord.ButtonStyle.primary)
-    async def claim_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        options = [
+            discord.SelectOption(label="Followers"),
+            discord.SelectOption(label="Views"),
+            discord.SelectOption(label="Likes"),
+        ]
 
-        if self.claimer:
-            await interaction.response.send_message("❌ Déjà claim.", ephemeral=True)
+        super().__init__(placeholder="Choisis le service...", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+
+        if interaction.user != self.creator:
+            await interaction.response.send_message("❌ Ce n'est pas ton ticket.", ephemeral=True)
             return
 
-        self.claimer = interaction.user
-
-        # Retire l'écriture des autres staff
-        for member in interaction.guild.members:
-            if any(role.name in ["Manager", "Founders"] for role in member.roles):
-                if member != interaction.user:
-                    await interaction.channel.set_permissions(member, send_messages=False)
-
-        # PayPal automatique
-        paypal = None
-        username = interaction.user.name.lower()
-
-        if username == "hayzoxs":
-            paypal = "https://www.paypal.me/HayZoXs"
-        elif username == "slayzixbetter":
-            paypal = "https://www.paypal.me/SlayzixxBetter"
-
+        service = self.values[0]
         await interaction.channel.send(
-            f"📌 Ticket réclamé par {interaction.user.mention}\n"
-            f"💳 PayPal : {paypal if paypal else 'Non défini'}"
+            f"📦 Service sélectionné : **{service}**\nChoisis maintenant la quantité 👇",
+            view=QuantitySelectView(self.creator, service)
         )
 
         await interaction.response.defer()
 
-    @discord.ui.button(label="💳 Confirmer paiement", style=discord.ButtonStyle.success)
-    async def confirm_payment(self, interaction: discord.Interaction, button: discord.ui.Button):
+class ServiceSelectView(discord.ui.View):
+    def __init__(self, creator):
+        super().__init__(timeout=None)
+        self.add_item(ServiceSelect(creator))
+
+# =============================
+# QUANTITY SELECT
+# =============================
+
+class QuantitySelect(discord.ui.Select):
+    def __init__(self, creator, service):
+        self.creator = creator
+        self.service = service
+
+        options = [
+            discord.SelectOption(label="1000"),
+            discord.SelectOption(label="5000"),
+            discord.SelectOption(label="10000"),
+        ]
+
+        super().__init__(placeholder="Choisis la quantité...", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
 
         if interaction.user != self.creator:
-            await interaction.response.send_message(
-                "❌ Seul le client peut confirmer.",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ Ce n'est pas ton ticket.", ephemeral=True)
             return
 
-        await interaction.channel.send("💳 Paiement confirmé par le client.")
+        quantity = int(self.values[0])
+        total = round(quantity * PRICES[self.service], 2)
+
+        embed = discord.Embed(
+            title="🧾 Facture",
+            description=(
+                f"🎯 Service : {self.service}\n"
+                f"📦 Quantité : {quantity}\n"
+                f"💰 Total : {total}€"
+            ),
+            color=discord.Color.green()
+        )
+
+        await interaction.channel.send(
+            embed=embed,
+            view=PaymentView(self.creator)
+        )
+
         await interaction.response.defer()
 
-    @discord.ui.button(label="🔒 Paiement validé (Staff)", style=discord.ButtonStyle.danger)
-    async def validate_payment(self, interaction: discord.Interaction, button: discord.ui.Button):
+class QuantitySelectView(discord.ui.View):
+    def __init__(self, creator, service):
+        super().__init__(timeout=None)
+        self.add_item(QuantitySelect(creator, service))
 
-        if interaction.user != self.claimer:
-            await interaction.response.send_message(
-                "❌ Seul le staff qui a claim peut valider.",
-                ephemeral=True
-            )
+# =============================
+# PAYMENT VIEW
+# =============================
+
+class PaymentView(discord.ui.View):
+    def __init__(self, creator):
+        super().__init__(timeout=None)
+        self.creator = creator
+        self.paid = False
+
+    @discord.ui.button(label="💳 PayPal HayZoXs", style=discord.ButtonStyle.link,
+                       url="https://www.paypal.me/HayZoXs")
+    async def paypal1(self, interaction: discord.Interaction, button: discord.ui.Button):
+        pass
+
+    @discord.ui.button(label="💳 PayPal Slayzix's", style=discord.ButtonStyle.link,
+                       url="https://www.paypal.me/SlayzixxBetter")
+    async def paypal2(self, interaction: discord.Interaction, button: discord.ui.Button):
+        pass
+
+    @discord.ui.button(label="✅ J'ai payé", style=discord.ButtonStyle.success)
+    async def paid_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+
+        if interaction.user != self.creator:
+            await interaction.response.send_message("❌ Seul le client peut cliquer.", ephemeral=True)
             return
 
-        await interaction.channel.send("✅ Paiement validé. Commande en cours 🚀")
+        self.paid = True
+        await interaction.channel.send("💬 Le client indique avoir payé. En attente confirmation staff.")
         await interaction.response.defer()
 
-# ==============================
-# CALCUL AUTOMATIQUE + FACTURE
-# ==============================
+    @discord.ui.button(label="🔒 Confirmer paiement (Staff)", style=discord.ButtonStyle.danger)
+    async def confirm_staff(self, interaction: discord.Interaction, button: discord.ui.Button):
 
-@bot.event
-async def on_message(message):
+        if not any(role.name in ["Manager", "Founders"] for role in interaction.user.roles):
+            await interaction.response.send_message("❌ Staff uniquement.", ephemeral=True)
+            return
 
-    if message.author.bot:
-        return
+        if not self.paid:
+            await interaction.response.send_message("❌ Le client n'a pas encore cliqué sur 'J'ai payé'.", ephemeral=True)
+            return
 
-    if message.channel.name.startswith("ticket-"):
+        await interaction.channel.send("✅ Paiement confirmé par le staff. Commande en cours 🚀")
+        await interaction.response.defer()
 
-        parts = message.content.lower().split()
-
-        if len(parts) == 2:
-
-            service = parts[0]
-
-            try:
-                quantity = int(parts[1])
-            except:
-                return
-
-            if service in PRICES:
-
-                total = round(quantity * PRICES[service], 2)
-
-                embed = discord.Embed(
-                    title="🧾 Facture automatique",
-                    description=(
-                        f"🎯 Service : {service.capitalize()}\n"
-                        f"📦 Quantité : {quantity}\n"
-                        f"💰 Total : {total}€"
-                    ),
-                    color=discord.Color.green()
-                )
-
-                await message.channel.send(embed=embed)
-
-    await bot.process_commands(message)
-
-# ==============================
+# =============================
 # COMMAND SHOP
-# ==============================
+# =============================
 
 @bot.command()
 async def shop(ctx):
 
     embed = discord.Embed(
         title="💎 SLAYZIX SHOP",
-        description=(
-            "🔥 Services TikTok disponibles\n\n"
-            "• followers\n"
-            "• views\n"
-            "• likes\n\n"
-            "💬 Dans le ticket écris :\n"
-            "`followers 5000`\n\n"
-            "💳 Le prix sera calculé automatiquement."
-        ),
+        description="Clique pour créer un ticket.",
         color=discord.Color.purple()
     )
 
     await ctx.send(embed=embed, view=ShopView())
 
-# ==============================
+# =============================
 
 bot.run(TOKEN)
