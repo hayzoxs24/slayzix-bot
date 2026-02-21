@@ -106,6 +106,7 @@ class ServiceSelect(discord.ui.Select):
             return
 
         service = self.values[0]
+
         await interaction.channel.send(
             f"📦 Service sélectionné : **{service}**\nChoisis maintenant la quantité 👇",
             view=QuantitySelectView(self.creator, service)
@@ -167,7 +168,7 @@ class QuantitySelectView(discord.ui.View):
         self.add_item(QuantitySelect(creator, service))
 
 # =============================
-# PAYMENT VIEW
+# PAYMENT VIEW (FIXED)
 # =============================
 
 class PaymentView(discord.ui.View):
@@ -176,15 +177,18 @@ class PaymentView(discord.ui.View):
         self.creator = creator
         self.paid = False
 
-    @discord.ui.button(label="💳 PayPal HayZoXs", style=discord.ButtonStyle.link,
-                       url="https://www.paypal.me/HayZoXs")
-    async def paypal1(self, interaction: discord.Interaction, button: discord.ui.Button):
-        pass
+        # Boutons PayPal (pas de decorator pour les link buttons)
+        self.add_item(discord.ui.Button(
+            label="💳 PayPal HayZoXs",
+            style=discord.ButtonStyle.link,
+            url="https://www.paypal.me/HayZoXs"
+        ))
 
-    @discord.ui.button(label="💳 PayPal Slayzix's", style=discord.ButtonStyle.link,
-                       url="https://www.paypal.me/SlayzixxBetter")
-    async def paypal2(self, interaction: discord.Interaction, button: discord.ui.Button):
-        pass
+        self.add_item(discord.ui.Button(
+            label="💳 PayPal Slayzix's",
+            style=discord.ButtonStyle.link,
+            url="https://www.paypal.me/SlayzixxBetter"
+        ))
 
     @discord.ui.button(label="✅ J'ai payé", style=discord.ButtonStyle.success)
     async def paid_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -205,7 +209,10 @@ class PaymentView(discord.ui.View):
             return
 
         if not self.paid:
-            await interaction.response.send_message("❌ Le client n'a pas encore cliqué sur 'J'ai payé'.", ephemeral=True)
+            await interaction.response.send_message(
+                "❌ Le client n'a pas encore cliqué sur 'J'ai payé'.",
+                ephemeral=True
+            )
             return
 
         await interaction.channel.send("✅ Paiement confirmé par le staff. Commande en cours 🚀")
