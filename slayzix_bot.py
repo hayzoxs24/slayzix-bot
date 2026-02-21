@@ -745,6 +745,70 @@ async def allshop(ctx):
     )
     await ctx.send(embed=embed, view=AllShopView())
 
+# ================= WELCOME =================
+
+welcome_channel_id = None
+
+
+class WelcomeChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self):
+        super().__init__(
+            placeholder="Choisis le salon de bienvenue",
+            channel_types=[discord.ChannelType.text]
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        global welcome_channel_id
+        welcome_channel_id = self.values[0].id
+        await interaction.response.send_message(
+            f"✅ Salon de bienvenue défini sur {self.values[0].mention} !",
+            ephemeral=True
+        )
+
+
+class WelcomeSetupView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(WelcomeChannelSelect())
+
+
+@bot.command()
+async def welcome(ctx):
+    embed = discord.Embed(
+        title="⚙️ Configuration — Bienvenue",
+        description="Sélectionne le salon où les messages de bienvenue seront envoyés.",
+        color=discord.Color.blurple()
+    )
+    await ctx.send(embed=embed, view=WelcomeSetupView())
+
+
+@bot.event
+async def on_member_join(member):
+    if welcome_channel_id is None:
+        return
+
+    channel = member.guild.get_channel(welcome_channel_id)
+    if channel is None:
+        return
+
+    embed = discord.Embed(
+        title="🎉 Bienvenue sur le serveur !",
+        description=(
+            f"Salut {member.mention}, on est ravis de t'accueillir sur **{member.guild.name}** ! 🙌\n\n"
+            f"Tu es le **{member.guild.member_count}ème** membre à nous rejoindre.\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"🛒 Consulte nos services et passe ta commande !\n"
+            f"💬 Notre équipe est là pour t'aider.\n"
+            f"━━━━━━━━━━━━━━━━━━━━"
+        ),
+        color=discord.Color.gold()
+    )
+    embed.set_thumbnail(url=member.display_avatar.url)
+    embed.set_footer(text="Slayzix Shop • Bienvenue parmi nous !")
+    embed.timestamp = discord.utils.utcnow()
+
+    await channel.send(embed=embed)
+
 # ================= START =================
 
 if __name__ == "__main__":
