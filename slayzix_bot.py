@@ -809,6 +809,67 @@ async def on_member_join(member):
 
     await channel.send(embed=embed)
 
+goodbye_channel_id = None
+
+
+class GoodbyeChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self):
+        super().__init__(
+            placeholder="Choisis le salon d'au revoir",
+            channel_types=[discord.ChannelType.text]
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        global goodbye_channel_id
+        goodbye_channel_id = self.values[0].id
+        await interaction.response.send_message(
+            f"✅ Salon d'au revoir défini sur {self.values[0].mention} !",
+            ephemeral=True
+        )
+
+
+class GoodbyeSetupView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(GoodbyeChannelSelect())
+
+
+@bot.command()
+async def goodbye(ctx):
+    embed = discord.Embed(
+        title="⚙️ Configuration — Au revoir",
+        description="Sélectionne le salon où les messages d'au revoir seront envoyés.",
+        color=discord.Color.blurple()
+    )
+    await ctx.send(embed=embed, view=GoodbyeSetupView())
+
+
+@bot.event
+async def on_member_remove(member):
+    if goodbye_channel_id is None:
+        return
+
+    channel = member.guild.get_channel(goodbye_channel_id)
+    if channel is None:
+        return
+
+    embed = discord.Embed(
+        title="👋 Départ du serveur",
+        description=(
+            f"**{member.name}** vient de quitter **{member.guild.name}**...\n\n"
+            f"Il reste désormais **{member.guild.member_count} membres** sur le serveur.\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"😔 On espère te revoir bientôt !\n"
+            f"━━━━━━━━━━━━━━━━━━━━"
+        ),
+        color=discord.Color.red()
+    )
+    embed.set_thumbnail(url=member.display_avatar.url)
+    embed.set_footer(text="Slayzix Shop • À bientôt !")
+    embed.timestamp = discord.utils.utcnow()
+
+    await channel.send(embed=embed)
+
 # ================= START =================
 
 if __name__ == "__main__":
