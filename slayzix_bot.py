@@ -1,10 +1,18 @@
 import discord
 from discord.ext import commands
+import os
 
-TOKEN = "TON_TOKEN_ICI"
-CATEGORY_ID = 123456789
+# ===============================
+# CONFIGURATION
+# ===============================
+
+TOKEN = os.getenv("TOKEN")  # Token via variable d'environnement
+CATEGORY_ID = 123456789  # ID de la catégorie où les tickets seront créés
 
 BANNER_URL = "https://cdn.discordapp.com/attachments/1462275672503357705/1474577936265904198/IMG_4255.png?ex=699a5b38&is=699909b8&hm=c7fe4cbce99d75b832edb22ba31db9a0d86711dc1f9bd32c14e6c1010307a302&"
+
+if not TOKEN:
+    raise ValueError("Le TOKEN n'est pas défini dans les variables d'environnement.")
 
 intents = discord.Intents.default()
 intents.guilds = True
@@ -14,9 +22,9 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 
-# ==========================================
-# MODAL POUR QUANTITÉ (MULTIPLE DE 1000)
-# ==========================================
+# ===============================
+# MODAL QUANTITÉ (MULTIPLE DE 1000)
+# ===============================
 
 class QuantityModal(discord.ui.Modal, title="Entrer la quantité (multiple de 1000)"):
 
@@ -66,9 +74,9 @@ class QuantityModal(discord.ui.Modal, title="Entrer la quantité (multiple de 10
             )
 
 
-# ==========================================
+# ===============================
 # BOUTONS DU TICKET
-# ==========================================
+# ===============================
 
 class QuantityButton(discord.ui.Button):
     def __init__(self, service):
@@ -100,9 +108,9 @@ class TicketView(discord.ui.View):
         self.add_item(CloseButton())
 
 
-# ==========================================
-# MENU PRINCIPAL SERVICES
-# ==========================================
+# ===============================
+# MENU PRINCIPAL
+# ===============================
 
 class MainServiceSelect(discord.ui.Select):
     def __init__(self):
@@ -125,6 +133,13 @@ class MainServiceSelect(discord.ui.Select):
         guild = interaction.guild
         category = guild.get_channel(CATEGORY_ID)
 
+        if category is None:
+            await interaction.response.send_message(
+                "❌ Catégorie invalide. Vérifie le CATEGORY_ID.",
+                ephemeral=True
+            )
+            return
+
         channel = await guild.create_text_channel(
             name=f"ticket-{interaction.user.name}",
             category=category
@@ -135,7 +150,7 @@ class MainServiceSelect(discord.ui.Select):
             description=(
                 f"👤 **Client :** {interaction.user.mention}\n"
                 f"📦 **Service choisi :** {service}\n\n"
-                "💎 **Ce que nous offrons :**\n"
+                "💎 **Nos avantages :**\n"
                 "• Engagement premium\n"
                 "• Livraison rapide\n"
                 "• Support actif\n"
@@ -163,9 +178,9 @@ class MainView(discord.ui.View):
         self.add_item(MainServiceSelect())
 
 
-# ==========================================
+# ===============================
 # COMMANDE PANEL
-# ==========================================
+# ===============================
 
 @bot.command()
 @commands.has_permissions(administrator=True)
@@ -192,13 +207,13 @@ async def panel(ctx):
     await ctx.send(embed=embed, view=MainView())
 
 
-# ==========================================
-# READY EVENT
-# ==========================================
+# ===============================
+# READY
+# ===============================
 
 @bot.event
 async def on_ready():
-    print(f"Connecté en tant que {bot.user}")
+    print(f"✅ Connecté en tant que {bot.user}")
     bot.add_view(MainView())
 
 
