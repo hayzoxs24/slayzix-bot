@@ -2,765 +2,656 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 import os
+import asyncio
+from datetime import datetime, timedelta
+import re
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# ================= PRIX =================
-
-TIKTOK_PRICES = {
-    "Followers": 2.0,
-    "Likes": 0.50,
-    "Views": 0.20
-}
-
-DISCORD_PRICES = {
-    "Membres en ligne": 4.5,
-    "Membres hors-ligne": 4.0,
-    "Boost x14": 3.0,
-    "Nitro 1 mois": 3.5
-}
-
-FORTNITE_PRICES = {
-    "V-Bucks": 7.50,
-}
-
-ROBLOX_PRICES = {
-    "Robux": 7.50,
-}
-
-APPS_PRICES = {
-    "ChatGPT Plus": 13.0,
-    "YouTube Premium": 8.0,
-    "Spotify Premium": 13.0,
-    "Prime Video": 10.50
-}
-
-FOURNISSEUR_PRICES = {
-    "Réseaux Sociaux": 10.0,
-    "Discord": 10.0,
-    "Fortnite": 10.0,
-    "Roblox": 10.0,
-    "Valorant": 10.0,
-    "Rocket League": 10.0,
-    "Applications": 10.0,
-    "Tous les fournisseurs": 50.0
-}
-
-ALLSHOP_PRICE = 75.0
-
 # ================= CONFIG GLOBALE =================
 
-welcome_channel_id = None
-goodbye_channel_id = None
-vouch_channel_id = None
+config = {
+    # Bienvenue
+    "welcome_channel": None,
+    "welcome_message": "Bienvenue {mention} sur **{server}** ! Tu es le membre n°{count} 🎉",
+    "welcome_dm": False,
+    "goodbye_channel": None,
+    "goodbye_message": "**{name}** vient de quitter {server}. Il reste {count} membres.",
+
+    # Tickets
+    "ticket_channel": None,
+    "ticket_category": None,
+    "ticket_support_role": None,
+    "ticket_log_channel": None,
+    "ticket_message": "Clique sur le bouton ci-dessous pour ouvrir un ticket.",
+
+    # Auto-rôle
+    "autorole": [],
+
+    # Logs
+    "log_channel": None,
+
+    # Anti-spam
+    "antispam_enabled": False,
+    "antispam_max": 5,
+    "antispam_interval": 3,
+    "antispam_action": "mute",
+    "antispam_mute_duration": 10,
+
+    # Anti-raid
+    "antiraid_enabled": False,
+    "antiraid_joins": 5,
+    "antiraid_interval": 10,
+    "antiraid_action": "kick",
+
+    # Auto-modération
+    "automod_enabled": False,
+    "automod_badwords": [],
+    "automod_links": False,
+    "automod_caps": False,
+    "automod_action": "delete",
+
+    # Mute role
+    "mute_role": None,
+}
+
+spam_tracker = {}
+raid_tracker = []
 
 # ================= UTILITAIRES =================
 
-async def create_ticket(interaction: discord.Interaction, title: str, description: str):
-    guild = interaction.guild
-    user = interaction.user
-
-    existing = discord.utils.get(guild.text_channels, name=f"ticket-{user.id}")
-    if existing:
-        return await interaction.response.send_message(
-            f"❌ Tu as déjà un ticket ouvert → {existing.mention}",
-            ephemeral=True
-        )
-
-    overwrites = {
-        guild.default_role: discord.PermissionOverwrite(read_messages=False),
-        user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-    }
-
-    # Donner accès aux admins
-    for role in guild.roles:
-        if role.permissions.administrator:
-            overwrites[role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
-
-    category = discord.utils.get(guild.categories, name="TICKETS")
-    if not category:
-        category = await guild.create_category("TICKETS")
-
-    channel = await guild.create_text_channel(
-        name=f"ticket-{user.id}",
-        overwrites=overwrites,
-        category=category
-    )
-
-    embed = discord.Embed(title=title, description=description, color=0x5865F2)
-    embed.set_footer(text="Slayzix Shop • Ticket")
-    embed.timestamp = discord.utils.utcnow()
-
-    await channel.send(user.mention, embed=embed, view=CloseTicketView())
-    await interaction.response.send_message(
-        f"✅ Ticket créé ! → {channel.mention}", ephemeral=True
-    )
+async def send_log(guild, description, color=0xED4245):
+    if not config["log_channel"]:
+        return
+    channel = guild.get_channel(config["log_channel"])
+    if not channel:
+        return
+    embed = discord.Embed(description=description, color=color, timestamp=discord.utils.utcnow())
+    embed.set_footer(text="Logs • Bot")
+    await channel.send(embed=embed)
 
 
-# ================= FERMETURE TICKET =================
-
-class CloseTicketView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @discord.ui.button(label="🔒 Fermer le ticket", style=discord.ButtonStyle.danger, custom_id="close_ticket")
-    async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message("🔒 Fermeture dans 5 secondes...")
-        import asyncio
-        await asyncio.sleep(5)
-        await interaction.channel.delete()
-
-
-# ================= MODALS =================
-
-class QuantityModal(discord.ui.Modal):
-    def __init__(self, service: str, platform: str):
-        super().__init__(title=f"Commande — {service}")
-        self.service = service
-        self.platform = platform
-
-        label = "Quantité" if service in ["Boost x14", "Nitro 1 mois"] else "Quantité (multiple de 1000)"
-        self.quantity = discord.ui.TextInput(label=label, required=True, placeholder="Ex: 1000")
-        self.add_item(self.quantity)
-
-    async def on_submit(self, interaction: discord.Interaction):
+async def mute_member(guild, member, duration_minutes=10, reason="Auto-modération"):
+    mute_role = guild.get_role(config["mute_role"]) if config["mute_role"] else None
+    if not mute_role:
         try:
-            value = int(self.quantity.value)
-        except ValueError:
-            return await interaction.response.send_message("❌ Entre un nombre entier valide.", ephemeral=True)
+            mute_role = await guild.create_role(name="Muted")
+            config["mute_role"] = mute_role.id
+            for channel in guild.channels:
+                await channel.set_permissions(mute_role, send_messages=False, speak=False)
+        except:
+            return
+    await member.add_roles(mute_role, reason=reason)
+    await asyncio.sleep(duration_minutes * 60)
+    await member.remove_roles(mute_role, reason="Fin du mute")
 
-        if self.platform == "tiktok":
-            if value < 1000 or value % 1000 != 0:
-                return await interaction.response.send_message("❌ Minimum 1000 et multiple de 1000.", ephemeral=True)
-            price = (value / 1000) * TIKTOK_PRICES[self.service]
+# ================= EVENTS =================
 
-        elif self.platform == "discord":
-            if self.service in ["Membres en ligne", "Membres hors-ligne"]:
-                if value < 1000 or value % 1000 != 0:
-                    return await interaction.response.send_message("❌ Minimum 1000 et multiple de 1000.", ephemeral=True)
-                price = (value / 1000) * DISCORD_PRICES[self.service]
-            elif self.service in ["Boost x14", "Nitro 1 mois"]:
-                if value < 1:
-                    return await interaction.response.send_message("❌ Quantité invalide.", ephemeral=True)
-                price = value * DISCORD_PRICES[self.service]
-            else:
-                return await interaction.response.send_message("❌ Service inconnu.", ephemeral=True)
-        else:
+@bot.event
+async def on_message(message):
+    if message.author.bot or not message.guild:
+        return await bot.process_commands(message)
+
+    member = message.author
+    guild = message.guild
+
+    # Anti-spam
+    if config["antispam_enabled"]:
+        uid = member.id
+        now = datetime.utcnow()
+        if uid not in spam_tracker:
+            spam_tracker[uid] = []
+        spam_tracker[uid] = [t for t in spam_tracker[uid] if (now - t).total_seconds() < config["antispam_interval"]]
+        spam_tracker[uid].append(now)
+
+        if len(spam_tracker[uid]) >= config["antispam_max"]:
+            spam_tracker[uid] = []
+            action = config["antispam_action"]
+            await message.delete()
+            if action == "warn":
+                await message.channel.send(f"⚠️ {member.mention} Stop le spam !", delete_after=5)
+            elif action == "mute":
+                dur = config["antispam_mute_duration"]
+                await message.channel.send(f"🔇 {member.mention} muté {dur} min pour spam.", delete_after=5)
+                asyncio.create_task(mute_member(guild, member, dur, "Anti-spam"))
+            elif action == "kick":
+                await member.kick(reason="Anti-spam")
+            elif action == "ban":
+                await member.ban(reason="Anti-spam")
+            await send_log(guild, f"🛡️ **Anti-spam** → {member.mention} ({action})\nSalon : {message.channel.mention}", 0xE67E22)
             return
 
-        await create_ticket(
-            interaction, "🎫 Facture",
-            f"📦 **Service :** {self.service}\n"
-            f"🔢 **Quantité :** {value:,}\n"
-            f"💰 **Prix :** {price:.2f}€\n\n"
-            f"💳 Paiement PayPal\n"
-            f"⚡ Livraison rapide\n"
-            f"💬 Merci de patienter, un vendeur arrive !"
-        )
-
-
-class FortniteModal(discord.ui.Modal):
-    def __init__(self, service: str):
-        super().__init__(title=f"Commande Fortnite — {service}")
-        self.service = service
-
-        if service == "V-Bucks":
-            self.field = discord.ui.TextInput(label="Quantité de V-Bucks (multiple de 1000)", required=True, placeholder="Ex: 1000")
-        else:
-            self.field = discord.ui.TextInput(label="Décris ta demande", style=discord.TextStyle.paragraph, required=True, placeholder="Ex: skin souhaité, budget, compte recherché...")
-        self.add_item(self.field)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        if self.service == "V-Bucks":
-            try:
-                value = int(self.field.value)
-                if value < 1000 or value % 1000 != 0:
-                    return await interaction.response.send_message("❌ Minimum 1000 et multiple de 1000.", ephemeral=True)
-                price = (value / 1000) * FORTNITE_PRICES["V-Bucks"]
-                desc = f"📦 **Service :** V-Bucks\n🔢 **Quantité :** {value:,}\n💰 **Prix :** {price:.2f}€\n\n💳 Paiement PayPal\n⚡ Livraison rapide\n💬 Merci de patienter !"
-            except ValueError:
-                return await interaction.response.send_message("❌ Valeur invalide.", ephemeral=True)
-        else:
-            desc = f"📦 **Service :** {self.service}\n📝 **Détails :** {self.field.value}\n\n💳 Paiement PayPal\n💬 Un vendeur reviendra vers toi rapidement."
-
-        await create_ticket(interaction, "🎫 Ticket Fortnite", desc)
-
-
-class RobloxModal(discord.ui.Modal):
-    def __init__(self, service: str):
-        super().__init__(title=f"Commande Roblox — {service}")
-        self.service = service
-
-        if service == "Robux":
-            self.field = discord.ui.TextInput(label="Quantité de Robux (multiple de 1000)", required=True, placeholder="Ex: 1000")
-        else:
-            self.field = discord.ui.TextInput(label="Décris ta demande", style=discord.TextStyle.paragraph, required=True, placeholder="Ex: nom du jeu, type de game pass, budget...")
-        self.add_item(self.field)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        if self.service == "Robux":
-            try:
-                value = int(self.field.value)
-                if value < 1000 or value % 1000 != 0:
-                    return await interaction.response.send_message("❌ Minimum 1000 et multiple de 1000.", ephemeral=True)
-                price = (value / 1000) * ROBLOX_PRICES["Robux"]
-                desc = f"📦 **Service :** Robux\n🔢 **Quantité :** {value:,}\n💰 **Prix :** {price:.2f}€\n\n💳 Paiement PayPal\n⚡ Livraison rapide\n💬 Merci de patienter !"
-            except ValueError:
-                return await interaction.response.send_message("❌ Valeur invalide.", ephemeral=True)
-        else:
-            desc = f"📦 **Service :** {self.service}\n📝 **Détails :** {self.field.value}\n\n💳 Paiement PayPal\n💬 Un vendeur reviendra vers toi rapidement."
-
-        await create_ticket(interaction, "🎫 Ticket Roblox", desc)
-
-
-class ValorantModal(discord.ui.Modal):
-    def __init__(self):
-        super().__init__(title="Commande Valorant — Riot Points")
-        self.details = discord.ui.TextInput(label="Décris ta demande", style=discord.TextStyle.paragraph, required=True, placeholder="Ex: quantité de RP souhaitée, budget...")
-        self.add_item(self.details)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        await create_ticket(interaction, "🎫 Ticket Valorant",
-            f"📦 **Service :** Riot Points\n📝 **Détails :** {self.details.value}\n\n💳 Paiement PayPal\n💬 Un vendeur reviendra vers toi rapidement.")
-
-
-class RocketLeagueModal(discord.ui.Modal):
-    def __init__(self):
-        super().__init__(title="Commande Rocket League")
-        self.details = discord.ui.TextInput(label="Décris ta demande", style=discord.TextStyle.paragraph, required=True, placeholder="Ex: rang du compte, skins, inventaire...")
-        self.add_item(self.details)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        await create_ticket(interaction, "🎫 Ticket Rocket League",
-            f"📦 **Service :** Comptes Rocket League\n📝 **Détails :** {self.details.value}\n\n💳 Paiement PayPal\n💬 Un vendeur reviendra vers toi rapidement.")
-
-
-class AppsModal(discord.ui.Modal):
-    def __init__(self, service: str):
-        super().__init__(title=f"Commande — {service}")
-        self.service = service
-        self.quantity = discord.ui.TextInput(label="Quantité", required=True, placeholder="Ex: 1")
-        self.add_item(self.quantity)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        try:
-            value = int(self.quantity.value)
-            if value < 1:
-                return await interaction.response.send_message("❌ Quantité invalide.", ephemeral=True)
-            price = value * APPS_PRICES[self.service]
-        except ValueError:
-            return await interaction.response.send_message("❌ Valeur invalide.", ephemeral=True)
-
-        await create_ticket(interaction, "🎫 Ticket Applications",
-            f"📦 **Service :** {self.service} (Lifetime)\n"
-            f"🔢 **Quantité :** {value}\n"
-            f"💰 **Prix :** {price:.2f}€\n\n"
-            f"💳 Paiement PayPal\n⚡ Livraison rapide\n💬 Merci de patienter !")
-
-
-# ================= SELECTS DU PANEL =================
-
-class TikTokSelect(discord.ui.Select):
-    def __init__(self):
-        super().__init__(
-            placeholder="🎵 Choisis ton service TikTok...",
-            custom_id="panel_tiktok_select",
-            options=[
-                discord.SelectOption(label="Followers", emoji="🚀", description="1000 Followers = 2.00€"),
-                discord.SelectOption(label="Likes", emoji="❤️", description="1000 Likes = 0.50€"),
-                discord.SelectOption(label="Views", emoji="👀", description="1000 Views = 0.20€"),
-            ]
-        )
-
-    async def callback(self, interaction: discord.Interaction):
-        await interaction.response.send_modal(QuantityModal(self.values[0], "tiktok"))
-
-
-class DiscordServiceSelect(discord.ui.Select):
-    def __init__(self):
-        super().__init__(
-            placeholder="💬 Choisis ton service Discord...",
-            custom_id="panel_discord_select",
-            options=[
-                discord.SelectOption(label="Membres en ligne", emoji="👥", description="1000 membres = 4.50€"),
-                discord.SelectOption(label="Membres hors-ligne", emoji="👤", description="1000 membres = 4.00€"),
-                discord.SelectOption(label="Boost x14", emoji="🚀", description="1 boost = 3.00€"),
-                discord.SelectOption(label="Nitro 1 mois", emoji="🎁", description="1 Nitro = 3.50€"),
-            ]
-        )
-
-    async def callback(self, interaction: discord.Interaction):
-        await interaction.response.send_modal(QuantityModal(self.values[0], "discord"))
-
-
-class FortniteSelect(discord.ui.Select):
-    def __init__(self):
-        super().__init__(
-            placeholder="🎮 Choisis ton service Fortnite...",
-            custom_id="panel_fortnite_select",
-            options=[
-                discord.SelectOption(label="V-Bucks", emoji="💎", description="1000 V-Bucks = 7.50€"),
-                discord.SelectOption(label="Packs de skins / bundles", emoji="🎁", description="Prix en ticket"),
-                discord.SelectOption(label="Comptes Fortnite", emoji="🕹️", description="Prix en ticket"),
-            ]
-        )
-
-    async def callback(self, interaction: discord.Interaction):
-        await interaction.response.send_modal(FortniteModal(self.values[0]))
-
-
-class RobloxSelect(discord.ui.Select):
-    def __init__(self):
-        super().__init__(
-            placeholder="🧱 Choisis ton service Roblox...",
-            custom_id="panel_roblox_select",
-            options=[
-                discord.SelectOption(label="Robux", emoji="💰", description="1000 Robux = 7.50€"),
-                discord.SelectOption(label="Game Pass", emoji="🎮", description="Prix en ticket"),
-            ]
-        )
-
-    async def callback(self, interaction: discord.Interaction):
-        await interaction.response.send_modal(RobloxModal(self.values[0]))
-
-
-class ValorantSelect(discord.ui.Select):
-    def __init__(self):
-        super().__init__(
-            placeholder="💠 Choisis ton service Valorant...",
-            custom_id="panel_valorant_select",
-            options=[
-                discord.SelectOption(label="Riot Points", emoji="💠", description="Prix en ticket"),
-            ]
-        )
-
-    async def callback(self, interaction: discord.Interaction):
-        await interaction.response.send_modal(ValorantModal())
-
-
-class RocketLeagueSelect(discord.ui.Select):
-    def __init__(self):
-        super().__init__(
-            placeholder="🚗 Choisis ton service Rocket League...",
-            custom_id="panel_rl_select",
-            options=[
-                discord.SelectOption(label="Comptes Rocket League", emoji="🏆", description="Rang / skins / inventaire"),
-            ]
-        )
-
-    async def callback(self, interaction: discord.Interaction):
-        await interaction.response.send_modal(RocketLeagueModal())
-
-
-class AppsSelect(discord.ui.Select):
-    def __init__(self):
-        super().__init__(
-            placeholder="📲 Choisis ton application...",
-            custom_id="panel_apps_select",
-            options=[
-                discord.SelectOption(label="ChatGPT Plus", emoji="🤖", description="Lifetime — 13€"),
-                discord.SelectOption(label="YouTube Premium", emoji="▶️", description="Lifetime — 8€"),
-                discord.SelectOption(label="Spotify Premium", emoji="🎵", description="Lifetime — 13€"),
-                discord.SelectOption(label="Prime Video", emoji="📺", description="Lifetime — 10.50€"),
-            ]
-        )
-
-    async def callback(self, interaction: discord.Interaction):
-        await interaction.response.send_modal(AppsModal(self.values[0]))
-
-
-class FournisseurSelect(discord.ui.Select):
-    def __init__(self):
-        super().__init__(
-            placeholder="🔑 Choisis ton accès fournisseur...",
-            custom_id="panel_fourni_select",
-            options=[
-                discord.SelectOption(label="Réseaux Sociaux", emoji="📱", description="10€"),
-                discord.SelectOption(label="Discord", emoji="💬", description="10€"),
-                discord.SelectOption(label="Fortnite", emoji="🎮", description="10€"),
-                discord.SelectOption(label="Roblox", emoji="🧱", description="10€"),
-                discord.SelectOption(label="Valorant", emoji="💠", description="10€"),
-                discord.SelectOption(label="Rocket League", emoji="🚗", description="10€"),
-                discord.SelectOption(label="Applications", emoji="📲", description="10€"),
-                discord.SelectOption(label="Tous les fournisseurs", emoji="🌟", description="Accès complet — 50€"),
-            ]
-        )
-
-    async def callback(self, interaction: discord.Interaction):
-        service = self.values[0]
-        price = FOURNISSEUR_PRICES[service]
-        await create_ticket(interaction, "🎫 Ticket Fournisseur",
-            f"📦 **Service :** Accès Fournisseur — {service}\n"
-            f"💰 **Prix :** {price:.2f}€\n\n"
-            f"💳 Paiement PayPal\n"
-            f"💬 Un vendeur reviendra vers toi rapidement.")
-
-
-# ================= VIEWS DU PANEL =================
-
-class PanelMainView(discord.ui.View):
-    """Panel principal — boutons de navigation par catégorie"""
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @discord.ui.button(label="🎵 TikTok", style=discord.ButtonStyle.primary, custom_id="panel_btn_tiktok", row=0)
-    async def btn_tiktok(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = _category_embed(
-            "🎵 TikTok Boost",
-            "Choisis le service que tu veux booster :",
-            [("🚀 Followers", "1 000 = **2.00€**"), ("❤️ Likes", "1 000 = **0.50€**"), ("👀 Views", "1 000 = **0.20€**")],
-            0xFF0050
-        )
-        await interaction.response.send_message(embed=embed, view=CategoryView(TikTokSelect()), ephemeral=True)
-
-    @discord.ui.button(label="💬 Discord", style=discord.ButtonStyle.primary, custom_id="panel_btn_discord", row=0)
-    async def btn_discord(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = _category_embed(
-            "💬 Discord Services",
-            "Choisis le service Discord :",
-            [("👥 Membres en ligne", "1 000 = **4.50€**"), ("👤 Membres hors-ligne", "1 000 = **4.00€**"), ("🚀 Boost x14", "1 boost = **3.00€**"), ("🎁 Nitro 1 mois", "1 Nitro = **3.50€**")],
-            0x5865F2
-        )
-        await interaction.response.send_message(embed=embed, view=CategoryView(DiscordServiceSelect()), ephemeral=True)
-
-    @discord.ui.button(label="🎮 Fortnite", style=discord.ButtonStyle.primary, custom_id="panel_btn_fortnite", row=0)
-    async def btn_fortnite(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = _category_embed(
-            "🎮 Fortnite Services",
-            "Choisis le service Fortnite :",
-            [("💎 V-Bucks", "1 000 = **7.50€**"), ("🎁 Packs de skins / bundles", "Prix en ticket"), ("🕹️ Comptes Fortnite", "Prix en ticket")],
-            0x00C3FF
-        )
-        await interaction.response.send_message(embed=embed, view=CategoryView(FortniteSelect()), ephemeral=True)
-
-    @discord.ui.button(label="🧱 Roblox", style=discord.ButtonStyle.primary, custom_id="panel_btn_roblox", row=1)
-    async def btn_roblox(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = _category_embed(
-            "🧱 Roblox Services",
-            "Choisis le service Roblox :",
-            [("💰 Robux", "1 000 = **7.50€**"), ("🎮 Game Pass", "Prix en ticket")],
-            0xE52207
-        )
-        await interaction.response.send_message(embed=embed, view=CategoryView(RobloxSelect()), ephemeral=True)
-
-    @discord.ui.button(label="💠 Valorant", style=discord.ButtonStyle.primary, custom_id="panel_btn_valorant", row=1)
-    async def btn_valorant(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = _category_embed(
-            "💠 Valorant Services",
-            "Choisis le service Valorant :",
-            [("💠 Riot Points", "Prix en ticket")],
-            0xFF4655
-        )
-        await interaction.response.send_message(embed=embed, view=CategoryView(ValorantSelect()), ephemeral=True)
-
-    @discord.ui.button(label="🚗 Rocket League", style=discord.ButtonStyle.primary, custom_id="panel_btn_rl", row=1)
-    async def btn_rl(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = _category_embed(
-            "🚗 Rocket League Services",
-            "Choisis le service Rocket League :",
-            [("🏆 Comptes RL", "Rang / skins / inventaire")],
-            0x0077FF
-        )
-        await interaction.response.send_message(embed=embed, view=CategoryView(RocketLeagueSelect()), ephemeral=True)
-
-    @discord.ui.button(label="📲 Applications", style=discord.ButtonStyle.success, custom_id="panel_btn_apps", row=2)
-    async def btn_apps(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = _category_embed(
-            "📲 Applications (Lifetime)",
-            "Choisis ton application :",
-            [("🤖 ChatGPT Plus", "**13.00€**"), ("▶️ YouTube Premium", "**8.00€**"), ("🎵 Spotify Premium", "**13.00€**"), ("📺 Prime Video", "**10.50€**")],
-            0x1DB954
-        )
-        await interaction.response.send_message(embed=embed, view=CategoryView(AppsSelect()), ephemeral=True)
-
-    @discord.ui.button(label="🔑 Accès Fournisseur", style=discord.ButtonStyle.success, custom_id="panel_btn_fourni", row=2)
-    async def btn_fourni(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = _category_embed(
-            "🔑 Accès Fournisseur",
-            "Accède aux fournisseurs pour revendre :",
-            [("📱 Réseaux Sociaux", "**10€**"), ("💬 Discord", "**10€**"), ("🎮 Fortnite", "**10€**"),
-             ("🧱 Roblox", "**10€**"), ("💠 Valorant", "**10€**"), ("🚗 Rocket League", "**10€**"),
-             ("📲 Applications", "**10€**"), ("🌟 Tous les fournisseurs", "**50€**")],
-            0xF1C40F
-        )
-        await interaction.response.send_message(embed=embed, view=CategoryView(FournisseurSelect()), ephemeral=True)
-
-    @discord.ui.button(label="🏆 Pack Shop Complet — 75€", style=discord.ButtonStyle.danger, custom_id="panel_btn_allshop", row=3)
-    async def btn_allshop(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = discord.Embed(
-            title="🏆 Pack Shop Complet — Offre Premium",
-            description=(
-                "Tout ce qu'il faut pour lancer ton business immédiatement.\n\n"
-                "✅ Accès Fournisseurs inclus\n"
-                "✅ Serveur Discord prêt à vendre\n"
-                "✅ Gestion complète (Management)\n"
-                "✅ Organisation & mise en place\n"
-                "✅ Conseils & optimisation\n\n"
-                f"💰 **Prix total : {ALLSHOP_PRICE:.2f}€**\n"
-                "💳 Paiement PayPal\n"
-                "🔒 Paiement sécurisé"
-            ),
-            color=0xFFD700
-        )
-        embed.set_footer(text="Slayzix Shop • Offre Premium")
-        await interaction.response.send_message(embed=embed, view=AllShopConfirmView(), ephemeral=True)
-
-
-class AllShopConfirmView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=60)
-
-    @discord.ui.button(label="🛒 Commander maintenant", style=discord.ButtonStyle.success, custom_id="allshop_confirm")
-    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await create_ticket(interaction, "🎫 Ticket Pack Shop Complet",
-            f"📦 **Service :** Pack Shop Complet — Offre Premium\n"
-            f"💰 **Prix :** {ALLSHOP_PRICE:.2f}€\n\n"
-            f"✅ Accès Fournisseurs inclus\n"
-            f"✅ Serveur Discord prêt à vendre\n"
-            f"✅ Gestion complète (Management)\n"
-            f"✅ Organisation & mise en place\n"
-            f"✅ Conseils & optimisation\n\n"
-            f"💳 Paiement PayPal\n"
-            f"💬 Un vendeur reviendra vers toi rapidement.")
-
-
-class CategoryView(discord.ui.View):
-    """View avec un select menu pour une catégorie"""
-    def __init__(self, select: discord.ui.Select):
-        super().__init__(timeout=120)
-        self.add_item(select)
-
-
-# ================= HELPER EMBED CATÉGORIE =================
-
-def _category_embed(title: str, desc: str, items: list, color: int) -> discord.Embed:
-    embed = discord.Embed(title=f"💎 SLAYZIX SHOP — {title}", description=desc, color=color)
-    for name, value in items:
-        embed.add_field(name=name, value=value, inline=True)
-    embed.add_field(name="\u200b", value="💳 Paiement PayPal • 🔒 Sécurisé • ⚡ Rapide", inline=False)
-    embed.set_footer(text="Slayzix Shop • Sélectionne ton service ci-dessous")
-    return embed
-
-
-# ================= COMMANDE /panel =================
-
-@bot.tree.command(name="panel", description="Affiche le panel de commande Slayzix Shop")
-async def panel(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="💎 SLAYZIX SHOP — Panel de Commande",
-        description=(
-            "Bienvenue sur **Slayzix Shop** !\n"
-            "Clique sur la catégorie de ton choix pour passer ta commande.\n\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "🎵 **TikTok** • 💬 **Discord** • 🎮 **Fortnite**\n"
-            "🧱 **Roblox** • 💠 **Valorant** • 🚗 **Rocket League**\n"
-            "📲 **Applications** • 🔑 **Accès Fournisseur**\n"
-            "🏆 **Pack Shop Complet**\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "💳 Paiement **PayPal** uniquement\n"
-            "🔒 Transactions **100% sécurisées**\n"
-            "⚡ Livraison **rapide & garantie**\n"
-            "💬 Support **actif 24/7**"
-        ),
-        color=0x5865F2
-    )
-    embed.set_thumbnail(url=interaction.guild.icon.url if interaction.guild.icon else None)
-    embed.set_footer(text="Slayzix Shop • Votre satisfaction est notre priorité")
-    embed.timestamp = discord.utils.utcnow()
-
-    await interaction.response.send_message(embed=embed, view=PanelMainView(), ephemeral=True)
-
-
-# ================= COMMANDE /deploy =================
-
-@bot.tree.command(name="deploy", description="[ADMIN] Déploie le panel dans ce salon de façon permanente")
-@app_commands.default_permissions(administrator=True)
-async def deploy(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="💎 SLAYZIX SHOP — Panel de Commande",
-        description=(
-            "Bienvenue sur **Slayzix Shop** !\n"
-            "Clique sur la catégorie de ton choix pour passer ta commande.\n\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "🎵 **TikTok** • 💬 **Discord** • 🎮 **Fortnite**\n"
-            "🧱 **Roblox** • 💠 **Valorant** • 🚗 **Rocket League**\n"
-            "📲 **Applications** • 🔑 **Accès Fournisseur**\n"
-            "🏆 **Pack Shop Complet**\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "💳 Paiement **PayPal** uniquement\n"
-            "🔒 Transactions **100% sécurisées**\n"
-            "⚡ Livraison **rapide & garantie**\n"
-            "💬 Support **actif 24/7**"
-        ),
-        color=0x5865F2
-    )
-    embed.set_thumbnail(url=interaction.guild.icon.url if interaction.guild.icon else None)
-    embed.set_footer(text="Slayzix Shop • Votre satisfaction est notre priorité")
-    embed.timestamp = discord.utils.utcnow()
-
-    await interaction.channel.send(embed=embed, view=PanelMainView())
-    await interaction.response.send_message("✅ Panel déployé dans ce salon !", ephemeral=True)
-
-
-# ================= VOUCH =================
-
-@bot.tree.command(name="vouch", description="Laisse un avis sur le shop !")
-@app_commands.describe(note="Ta note sur 5", service="Le service acheté", commentaire="Ton commentaire")
-@app_commands.choices(note=[
-    app_commands.Choice(name="⭐ 1/5", value=1),
-    app_commands.Choice(name="⭐⭐ 2/5", value=2),
-    app_commands.Choice(name="⭐⭐⭐ 3/5", value=3),
-    app_commands.Choice(name="⭐⭐⭐⭐ 4/5", value=4),
-    app_commands.Choice(name="⭐⭐⭐⭐⭐ 5/5", value=5),
-])
-async def vouch(interaction: discord.Interaction, note: int, service: str, commentaire: str):
-    stars = "⭐" * note + "🌑" * (5 - note)
-    colors = {1: 0xED4245, 2: 0xE67E22, 3: 0xFEE75C, 4: 0x57F287, 5: 0xFFD700}
-    badges = {1: "😡 Très mauvais", 2: "😕 Mauvais", 3: "😐 Correct", 4: "😊 Bien", 5: "🤩 Excellent !"}
-
-    embed = discord.Embed(title="📝 Nouvel Avis — Slayzix Shop", color=colors[note])
-    embed.add_field(name="👤 Client", value=interaction.user.mention, inline=True)
-    embed.add_field(name="📦 Service", value=f"**{service}**", inline=True)
-    embed.add_field(name="⭐ Note", value=f"{stars}  `{note}/5` — {badges[note]}", inline=False)
-    embed.add_field(name="💬 Commentaire", value=f"*{commentaire}*", inline=False)
-    embed.set_thumbnail(url=interaction.user.display_avatar.url)
-    embed.set_footer(text="Slayzix Shop • Merci pour ton avis !")
-    embed.timestamp = discord.utils.utcnow()
-
-    if vouch_channel_id:
-        channel = interaction.guild.get_channel(vouch_channel_id)
-        if channel:
-            await channel.send(embed=embed)
-            return await interaction.response.send_message(f"✅ Avis posté dans {channel.mention}, merci ! 🙏", ephemeral=True)
-
-    await interaction.response.send_message(embed=embed)
-
-
-# ================= WELCOME / GOODBYE =================
-
-class WelcomeChannelSelect(discord.ui.ChannelSelect):
-    def __init__(self):
-        super().__init__(placeholder="Choisis le salon de bienvenue", channel_types=[discord.ChannelType.text])
-
-    async def callback(self, interaction: discord.Interaction):
-        global welcome_channel_id
-        welcome_channel_id = self.values[0].id
-        await interaction.response.send_message(f"✅ Salon de bienvenue → {self.values[0].mention}", ephemeral=True)
-
-
-class GoodbyeChannelSelect(discord.ui.ChannelSelect):
-    def __init__(self):
-        super().__init__(placeholder="Choisis le salon d'au revoir", channel_types=[discord.ChannelType.text])
-
-    async def callback(self, interaction: discord.Interaction):
-        global goodbye_channel_id
-        goodbye_channel_id = self.values[0].id
-        await interaction.response.send_message(f"✅ Salon d'au revoir → {self.values[0].mention}", ephemeral=True)
-
-
-class VouchChannelSelect(discord.ui.ChannelSelect):
-    def __init__(self):
-        super().__init__(placeholder="Choisis le salon des avis", channel_types=[discord.ChannelType.text])
-
-    async def callback(self, interaction: discord.Interaction):
-        global vouch_channel_id
-        vouch_channel_id = self.values[0].id
-        await interaction.response.send_message(f"✅ Salon des avis → {self.values[0].mention}", ephemeral=True)
-
-
-class SetupView(discord.ui.View):
-    def __init__(self, select):
-        super().__init__(timeout=None)
-        self.add_item(select)
-
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def welcome(ctx):
-    embed = discord.Embed(title="⚙️ Configuration — Bienvenue", description="Sélectionne le salon de bienvenue.", color=0x5865F2)
-    await ctx.send(embed=embed, view=SetupView(WelcomeChannelSelect()))
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def goodbye(ctx):
-    embed = discord.Embed(title="⚙️ Configuration — Au revoir", description="Sélectionne le salon d'au revoir.", color=0x5865F2)
-    await ctx.send(embed=embed, view=SetupView(GoodbyeChannelSelect()))
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def setvouchchannel(ctx):
-    embed = discord.Embed(title="⚙️ Configuration — Avis", description="Sélectionne le salon des avis.", color=0x5865F2)
-    await ctx.send(embed=embed, view=SetupView(VouchChannelSelect()))
+    # Auto-modération
+    if config["automod_enabled"]:
+        content = message.content
+        for word in config["automod_badwords"]:
+            if word.lower() in content.lower():
+                await message.delete()
+                await _apply_automod(message, f"mot interdit : `{word}`")
+                return
+        if config["automod_links"] and re.search(r"https?://|discord\.gg/", content):
+            await message.delete()
+            await _apply_automod(message, "lien non autorisé")
+            return
+        if config["automod_caps"] and len(content) > 10:
+            upper = sum(1 for c in content if c.isupper())
+            if upper / len(content) > 0.7:
+                await message.delete()
+                await _apply_automod(message, "trop de majuscules")
+                return
+
+    await bot.process_commands(message)
+
+
+async def _apply_automod(message, reason):
+    member = message.author
+    guild = message.guild
+    action = config["automod_action"]
+    if action == "warn":
+        await message.channel.send(f"⚠️ {member.mention} Message supprimé : {reason}.", delete_after=5)
+    elif action == "mute":
+        await message.channel.send(f"🔇 {member.mention} muté pour {reason}.", delete_after=5)
+        asyncio.create_task(mute_member(guild, member, 10, f"Auto-mod : {reason}"))
+    await send_log(guild, f"🤖 **Auto-mod** → {member.mention}\nRaison : {reason}\nSalon : {message.channel.mention}", 0xE67E22)
 
 
 @bot.event
 async def on_member_join(member):
-    if not welcome_channel_id:
-        return
-    channel = member.guild.get_channel(welcome_channel_id)
-    if not channel:
-        return
-    embed = discord.Embed(
-        title="🎉 Bienvenue sur le serveur !",
-        description=(
-            f"Salut {member.mention}, on est ravis de t'accueillir sur **{member.guild.name}** ! 🙌\n\n"
-            f"Tu es le **{member.guild.member_count}ème** membre à nous rejoindre.\n\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"🛒 Consulte nos services avec `/panel` !\n"
-            f"💬 Notre équipe est là pour t'aider.\n"
-            f"━━━━━━━━━━━━━━━━━━━━"
-        ),
-        color=0xFFD700
-    )
-    embed.set_thumbnail(url=member.display_avatar.url)
-    embed.set_footer(text="Slayzix Shop • Bienvenue parmi nous !")
-    embed.timestamp = discord.utils.utcnow()
-    await channel.send(embed=embed)
+    guild = member.guild
+    now = datetime.utcnow()
+
+    # Anti-raid
+    if config["antiraid_enabled"]:
+        global raid_tracker
+        raid_tracker = [t for t in raid_tracker if (now - t).total_seconds() < config["antiraid_interval"]]
+        raid_tracker.append(now)
+        if len(raid_tracker) >= config["antiraid_joins"]:
+            raid_tracker = []
+            action = config["antiraid_action"]
+            await send_log(guild, f"🚨 **RAID DÉTECTÉ !** Action : **{action}**", 0xFF0000)
+            if action == "kick":
+                try: await member.kick(reason="Anti-raid")
+                except: pass
+            elif action == "ban":
+                try: await member.ban(reason="Anti-raid")
+                except: pass
+            elif action == "lockdown":
+                for ch in guild.text_channels:
+                    try: await ch.set_permissions(guild.default_role, send_messages=False)
+                    except: pass
+                await send_log(guild, "🔒 **LOCKDOWN activé** — Tous les salons verrouillés.", 0xFF0000)
+            return
+
+    # Auto-rôle
+    for role_id in config["autorole"]:
+        role = guild.get_role(role_id)
+        if role:
+            try: await member.add_roles(role)
+            except: pass
+
+    # Bienvenue
+    if config["welcome_channel"]:
+        channel = guild.get_channel(config["welcome_channel"])
+        if channel:
+            msg = config["welcome_message"]\
+                .replace("{mention}", member.mention)\
+                .replace("{name}", member.name)\
+                .replace("{server}", guild.name)\
+                .replace("{count}", str(guild.member_count))
+            embed = discord.Embed(description=msg, color=0x57F287)
+            embed.set_author(name="Bienvenue !", icon_url=member.display_avatar.url)
+            embed.set_thumbnail(url=member.display_avatar.url)
+            embed.set_footer(text=f"{guild.name} • Membre n°{guild.member_count}")
+            embed.timestamp = discord.utils.utcnow()
+            await channel.send(embed=embed)
+
+    if config["welcome_dm"]:
+        try:
+            msg = config["welcome_message"]\
+                .replace("{mention}", member.name)\
+                .replace("{name}", member.name)\
+                .replace("{server}", guild.name)\
+                .replace("{count}", str(guild.member_count))
+            await member.send(embed=discord.Embed(title=f"Bienvenue sur {guild.name} !", description=msg, color=0x57F287))
+        except: pass
+
+    await send_log(guild, f"📥 **Membre rejoint** → {member.mention} (`{member.id}`)\nCompte créé : <t:{int(member.created_at.timestamp())}:R>", 0x57F287)
 
 
 @bot.event
 async def on_member_remove(member):
-    if not goodbye_channel_id:
-        return
-    channel = member.guild.get_channel(goodbye_channel_id)
-    if not channel:
-        return
-    embed = discord.Embed(
-        title="👋 Départ du serveur",
-        description=(
-            f"**{member.name}** vient de quitter **{member.guild.name}**...\n\n"
-            f"Il reste désormais **{member.guild.member_count} membres**.\n\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"😔 On espère te revoir bientôt !\n"
-            f"━━━━━━━━━━━━━━━━━━━━"
-        ),
-        color=0xED4245
-    )
-    embed.set_thumbnail(url=member.display_avatar.url)
-    embed.set_footer(text="Slayzix Shop • À bientôt !")
+    guild = member.guild
+    if config["goodbye_channel"]:
+        channel = guild.get_channel(config["goodbye_channel"])
+        if channel:
+            msg = config["goodbye_message"]\
+                .replace("{mention}", member.mention)\
+                .replace("{name}", member.name)\
+                .replace("{server}", guild.name)\
+                .replace("{count}", str(guild.member_count))
+            embed = discord.Embed(description=msg, color=0xED4245)
+            embed.set_author(name="Départ du serveur", icon_url=member.display_avatar.url)
+            embed.timestamp = discord.utils.utcnow()
+            await channel.send(embed=embed)
+    await send_log(guild, f"📤 **Membre parti** → {member.mention} (`{member.id}`)", 0xED4245)
+
+
+@bot.event
+async def on_message_delete(message):
+    if message.author.bot: return
+    await send_log(message.guild, f"🗑️ **Message supprimé** par {message.author.mention}\nSalon : {message.channel.mention}\n> {message.content[:300] or '*Aucun contenu*'}", 0xFEE75C)
+
+
+@bot.event
+async def on_member_ban(guild, user):
+    await send_log(guild, f"🔨 **Banni** → {user.mention} (`{user.id}`)", 0xED4245)
+
+# ================= TICKETS =================
+
+class TicketOpenView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="📩 Ouvrir un ticket", style=discord.ButtonStyle.primary, custom_id="ticket_open_btn")
+    async def open_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        guild = interaction.guild
+        user = interaction.user
+
+        existing = discord.utils.get(guild.text_channels, name=f"ticket-{user.id}")
+        if existing:
+            return await interaction.response.send_message(f"❌ Tu as déjà un ticket → {existing.mention}", ephemeral=True)
+
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+        }
+        if config["ticket_support_role"]:
+            role = guild.get_role(config["ticket_support_role"])
+            if role:
+                overwrites[role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+
+        category = guild.get_channel(config["ticket_category"]) if config["ticket_category"] else None
+        if not category:
+            category = discord.utils.get(guild.categories, name="TICKETS") or await guild.create_category("TICKETS")
+
+        channel = await guild.create_text_channel(f"ticket-{user.id}", overwrites=overwrites, category=category)
+
+        embed = discord.Embed(title="🎫 Ticket ouvert", description=f"Bonjour {user.mention} !\nL'équipe va te répondre rapidement.\n\nPour fermer ce ticket, clique ci-dessous.", color=0x5865F2)
+        embed.set_footer(text="Support")
+        embed.timestamp = discord.utils.utcnow()
+        await channel.send(user.mention, embed=embed, view=TicketCloseView())
+        await interaction.response.send_message(f"✅ Ticket créé → {channel.mention}", ephemeral=True)
+
+        if config["ticket_log_channel"]:
+            log_ch = guild.get_channel(config["ticket_log_channel"])
+            if log_ch:
+                await log_ch.send(embed=discord.Embed(description=f"📩 **Ticket ouvert** par {user.mention} → {channel.mention}", color=0x57F287, timestamp=discord.utils.utcnow()))
+
+
+class TicketCloseView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="🔒 Fermer le ticket", style=discord.ButtonStyle.danger, custom_id="ticket_close_btn")
+    async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("🔒 Fermeture dans 5 secondes...")
+        if config["ticket_log_channel"]:
+            log_ch = interaction.guild.get_channel(config["ticket_log_channel"])
+            if log_ch:
+                await log_ch.send(embed=discord.Embed(description=f"🔒 **Ticket fermé** → `{interaction.channel.name}` par {interaction.user.mention}", color=0xED4245, timestamp=discord.utils.utcnow()))
+        await asyncio.sleep(5)
+        await interaction.channel.delete()
+
+# ================= MODALS DU PANEL =================
+
+class WelcomeModal(discord.ui.Modal, title="⚙️ Bienvenue / Au revoir"):
+    ch_welcome = discord.ui.TextInput(label="ID salon bienvenue (vide = désactivé)", required=False)
+    msg_welcome = discord.ui.TextInput(label="Message bienvenue ({mention} {name} {server} {count})", style=discord.TextStyle.paragraph, required=False)
+    dm = discord.ui.TextInput(label="DM de bienvenue ? (oui/non)", required=False, default="non")
+    ch_goodbye = discord.ui.TextInput(label="ID salon au revoir (vide = désactivé)", required=False)
+    msg_goodbye = discord.ui.TextInput(label="Message au revoir", style=discord.TextStyle.paragraph, required=False)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if self.ch_welcome.value:
+            ch = interaction.guild.get_channel(int(self.ch_welcome.value))
+            config["welcome_channel"] = ch.id if ch else None
+        else:
+            config["welcome_channel"] = None
+        if self.msg_welcome.value:
+            config["welcome_message"] = self.msg_welcome.value
+        config["welcome_dm"] = self.dm.value.lower() in ["oui", "yes", "o", "y"]
+        if self.ch_goodbye.value:
+            ch = interaction.guild.get_channel(int(self.ch_goodbye.value))
+            config["goodbye_channel"] = ch.id if ch else None
+        else:
+            config["goodbye_channel"] = None
+        if self.msg_goodbye.value:
+            config["goodbye_message"] = self.msg_goodbye.value
+        await interaction.response.send_message("✅ Bienvenue/Au revoir configuré !", ephemeral=True)
+
+
+class TicketModal(discord.ui.Modal, title="⚙️ Tickets"):
+    ch_ticket = discord.ui.TextInput(label="ID salon (où poser le bouton ticket)", required=False)
+    cat_ticket = discord.ui.TextInput(label="ID catégorie pour les tickets", required=False)
+    role_support = discord.ui.TextInput(label="ID rôle support", required=False)
+    ch_log = discord.ui.TextInput(label="ID salon logs tickets", required=False)
+    msg = discord.ui.TextInput(label="Message du panel ticket", style=discord.TextStyle.paragraph, required=False)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if self.ch_ticket.value: config["ticket_channel"] = int(self.ch_ticket.value)
+        if self.cat_ticket.value: config["ticket_category"] = int(self.cat_ticket.value)
+        if self.role_support.value: config["ticket_support_role"] = int(self.role_support.value)
+        if self.ch_log.value: config["ticket_log_channel"] = int(self.ch_log.value)
+        if self.msg.value: config["ticket_message"] = self.msg.value
+        await interaction.response.send_message("✅ Tickets configurés !", ephemeral=True)
+
+
+class AutoroleModal(discord.ui.Modal, title="⚙️ Auto-rôle"):
+    roles = discord.ui.TextInput(label="IDs des rôles séparés par des virgules", placeholder="Ex: 111111, 222222")
+
+    async def on_submit(self, interaction: discord.Interaction):
+        ids = [r.strip() for r in self.roles.value.split(",") if r.strip().isdigit()]
+        config["autorole"] = [int(i) for i in ids]
+        roles_txt = ", ".join(f"<@&{i}>" for i in config["autorole"]) or "Aucun"
+        await interaction.response.send_message(f"✅ Auto-rôle : {roles_txt}", ephemeral=True)
+
+
+class LogsModal(discord.ui.Modal, title="⚙️ Logs"):
+    ch_log = discord.ui.TextInput(label="ID du salon de logs", required=True)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            ch = interaction.guild.get_channel(int(self.ch_log.value))
+            if not ch:
+                return await interaction.response.send_message("❌ Salon introuvable.", ephemeral=True)
+            config["log_channel"] = ch.id
+            await interaction.response.send_message(f"✅ Logs → {ch.mention}", ephemeral=True)
+        except:
+            await interaction.response.send_message("❌ ID invalide.", ephemeral=True)
+
+
+class AntispamModal(discord.ui.Modal, title="⚙️ Anti-Spam"):
+    max_msg = discord.ui.TextInput(label="Nb max de messages avant sanction", default="5")
+    interval = discord.ui.TextInput(label="Intervalle en secondes", default="3")
+    action = discord.ui.TextInput(label="Action : warn / mute / kick / ban", default="mute")
+    mute_dur = discord.ui.TextInput(label="Durée du mute (minutes)", default="10")
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            config["antispam_max"] = int(self.max_msg.value)
+            config["antispam_interval"] = int(self.interval.value)
+            config["antispam_mute_duration"] = int(self.mute_dur.value)
+            if self.action.value in ["warn", "mute", "kick", "ban"]:
+                config["antispam_action"] = self.action.value
+            config["antispam_enabled"] = True
+            await interaction.response.send_message(
+                f"✅ Anti-spam activé !\n`{config['antispam_max']} msg / {config['antispam_interval']}s` → **{config['antispam_action']}**", ephemeral=True)
+        except:
+            await interaction.response.send_message("❌ Valeurs invalides.", ephemeral=True)
+
+
+class AntiRaidModal(discord.ui.Modal, title="⚙️ Anti-Raid"):
+    joins = discord.ui.TextInput(label="Nb de joins pour déclencher l'alerte", default="5")
+    interval = discord.ui.TextInput(label="Intervalle en secondes", default="10")
+    action = discord.ui.TextInput(label="Action : kick / ban / lockdown", default="kick")
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            config["antiraid_joins"] = int(self.joins.value)
+            config["antiraid_interval"] = int(self.interval.value)
+            if self.action.value in ["kick", "ban", "lockdown"]:
+                config["antiraid_action"] = self.action.value
+            config["antiraid_enabled"] = True
+            await interaction.response.send_message(
+                f"✅ Anti-raid activé !\n`{config['antiraid_joins']} joins / {config['antiraid_interval']}s` → **{config['antiraid_action']}**", ephemeral=True)
+        except:
+            await interaction.response.send_message("❌ Valeurs invalides.", ephemeral=True)
+
+
+class AutomodModal(discord.ui.Modal, title="⚙️ Auto-Modération"):
+    badwords = discord.ui.TextInput(label="Mots interdits (séparés par virgules)", required=False, placeholder="mot1, mot2, mot3")
+    links = discord.ui.TextInput(label="Bloquer les liens ? (oui/non)", default="non")
+    caps = discord.ui.TextInput(label="Bloquer les MAJUSCULES ? (oui/non)", default="non")
+    action = discord.ui.TextInput(label="Action : delete / warn / mute", default="delete")
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if self.badwords.value:
+            config["automod_badwords"] = [w.strip() for w in self.badwords.value.split(",") if w.strip()]
+        config["automod_links"] = self.links.value.lower() in ["oui", "yes", "o", "y"]
+        config["automod_caps"] = self.caps.value.lower() in ["oui", "yes", "o", "y"]
+        if self.action.value in ["delete", "warn", "mute"]:
+            config["automod_action"] = self.action.value
+        config["automod_enabled"] = True
+        await interaction.response.send_message(
+            f"✅ Auto-mod activé !\n"
+            f"🚫 Mots interdits : `{len(config['automod_badwords'])}`\n"
+            f"🔗 Liens bloqués : `{config['automod_links']}`\n"
+            f"🔠 Caps bloqués : `{config['automod_caps']}`\n"
+            f"⚡ Action : `{config['automod_action']}`", ephemeral=True)
+
+# ================= PANEL VIEW =================
+
+def build_panel_embed(guild):
+    def s(val): return "🟢 Actif" if val else "🔴 Inactif"
+    embed = discord.Embed(title="⚙️ Panel de Configuration", description=f"Serveur : **{guild.name}**\nClique sur un bouton pour configurer.", color=0x5865F2)
+    embed.add_field(name="👋 Bienvenue", value=s(config["welcome_channel"]), inline=True)
+    embed.add_field(name="🎫 Tickets", value=s(config["ticket_channel"]), inline=True)
+    embed.add_field(name="🎭 Auto-rôle", value=s(config["autorole"]), inline=True)
+    embed.add_field(name="📋 Logs", value=s(config["log_channel"]), inline=True)
+    embed.add_field(name="🛡️ Anti-Spam", value=s(config["antispam_enabled"]), inline=True)
+    embed.add_field(name="🚨 Anti-Raid", value=s(config["antiraid_enabled"]), inline=True)
+    embed.add_field(name="🤖 Auto-Mod", value=s(config["automod_enabled"]), inline=True)
+    embed.set_thumbnail(url=guild.icon.url if guild.icon else None)
+    embed.set_footer(text="Panel de configuration")
     embed.timestamp = discord.utils.utcnow()
-    await channel.send(embed=embed)
+    return embed
+
+
+class PanelView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="👋 Bienvenue", style=discord.ButtonStyle.primary, custom_id="panel_welcome", row=0)
+    async def welcome_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(WelcomeModal())
+
+    @discord.ui.button(label="🎫 Tickets", style=discord.ButtonStyle.primary, custom_id="panel_tickets", row=0)
+    async def tickets_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(TicketModal())
+
+    @discord.ui.button(label="🎭 Auto-rôle", style=discord.ButtonStyle.primary, custom_id="panel_autorole", row=0)
+    async def autorole_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(AutoroleModal())
+
+    @discord.ui.button(label="📋 Logs", style=discord.ButtonStyle.secondary, custom_id="panel_logs", row=1)
+    async def logs_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(LogsModal())
+
+    @discord.ui.button(label="🛡️ Anti-Spam", style=discord.ButtonStyle.secondary, custom_id="panel_antispam", row=1)
+    async def antispam_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(AntispamModal())
+
+    @discord.ui.button(label="🚨 Anti-Raid", style=discord.ButtonStyle.secondary, custom_id="panel_antiraid", row=1)
+    async def antiraid_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(AntiRaidModal())
+
+    @discord.ui.button(label="🤖 Auto-Mod", style=discord.ButtonStyle.secondary, custom_id="panel_automod", row=2)
+    async def automod_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(AutomodModal())
+
+    @discord.ui.button(label="🚀 Déployer les Tickets", style=discord.ButtonStyle.success, custom_id="panel_deploy", row=2)
+    async def deploy_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not config["ticket_channel"]:
+            return await interaction.response.send_message("❌ Configure d'abord un salon dans **🎫 Tickets**.", ephemeral=True)
+        channel = interaction.guild.get_channel(config["ticket_channel"])
+        if not channel:
+            return await interaction.response.send_message("❌ Salon introuvable.", ephemeral=True)
+        embed = discord.Embed(title="🎫 Support — Ouvrir un ticket", description=config["ticket_message"], color=0x5865F2)
+        embed.set_footer(text=interaction.guild.name)
+        await channel.send(embed=embed, view=TicketOpenView())
+        await interaction.response.send_message(f"✅ Panel ticket déployé dans {channel.mention} !", ephemeral=True)
+
+    @discord.ui.button(label="🔴 OFF Anti-Spam", style=discord.ButtonStyle.danger, custom_id="panel_off_spam", row=3)
+    async def off_spam(self, interaction: discord.Interaction, button: discord.ui.Button):
+        config["antispam_enabled"] = False
+        await interaction.response.send_message("🔴 Anti-spam désactivé.", ephemeral=True)
+
+    @discord.ui.button(label="🔴 OFF Anti-Raid", style=discord.ButtonStyle.danger, custom_id="panel_off_raid", row=3)
+    async def off_raid(self, interaction: discord.Interaction, button: discord.ui.Button):
+        config["antiraid_enabled"] = False
+        await interaction.response.send_message("🔴 Anti-raid désactivé.", ephemeral=True)
+
+    @discord.ui.button(label="🔴 OFF Auto-Mod", style=discord.ButtonStyle.danger, custom_id="panel_off_automod", row=3)
+    async def off_automod(self, interaction: discord.Interaction, button: discord.ui.Button):
+        config["automod_enabled"] = False
+        await interaction.response.send_message("🔴 Auto-modération désactivée.", ephemeral=True)
+
+# ================= SLASH COMMANDS =================
+
+@bot.tree.command(name="panel", description="Ouvre le panel de configuration")
+@app_commands.default_permissions(administrator=True)
+async def panel_cmd(interaction: discord.Interaction):
+    await interaction.response.send_message(embed=build_panel_embed(interaction.guild), view=PanelView(), ephemeral=True)
+
+
+@bot.tree.command(name="lockdown", description="[ADMIN] Verrouille ou déverrouille tous les salons")
+@app_commands.default_permissions(administrator=True)
+@app_commands.describe(action="lock ou unlock")
+async def lockdown(interaction: discord.Interaction, action: str):
+    locked = action.lower() == "lock"
+    count = 0
+    for ch in interaction.guild.text_channels:
+        try:
+            await ch.set_permissions(interaction.guild.default_role, send_messages=not locked)
+            count += 1
+        except: pass
+    label = "🔒 Lockdown activé" if locked else "🔓 Lockdown désactivé"
+    await interaction.response.send_message(f"{label} — {count} salons modifiés.", ephemeral=True)
+    await send_log(interaction.guild, f"{'🔒' if locked else '🔓'} **{label}** par {interaction.user.mention}", 0xFF0000 if locked else 0x57F287)
+
+
+@bot.tree.command(name="warn", description="Avertir un membre")
+@app_commands.default_permissions(moderate_members=True)
+@app_commands.describe(member="Le membre", raison="La raison")
+async def warn(interaction: discord.Interaction, member: discord.Member, raison: str = "Aucune raison"):
+    embed = discord.Embed(description=f"⚠️ {member.mention} a reçu un avertissement.\nRaison : **{raison}**", color=0xFEE75C)
+    await interaction.response.send_message(embed=embed)
+    await send_log(interaction.guild, f"⚠️ **Warn** → {member.mention}\nPar : {interaction.user.mention}\nRaison : {raison}", 0xFEE75C)
+    try: await member.send(embed=discord.Embed(description=f"⚠️ Tu as reçu un avertissement sur **{interaction.guild.name}**.\nRaison : {raison}", color=0xFEE75C))
+    except: pass
+
+
+@bot.tree.command(name="mute", description="Muter un membre")
+@app_commands.default_permissions(moderate_members=True)
+@app_commands.describe(member="Le membre", duree="Durée en minutes", raison="La raison")
+async def mute_cmd(interaction: discord.Interaction, member: discord.Member, duree: int = 10, raison: str = "Aucune raison"):
+    await interaction.response.send_message(f"🔇 {member.mention} muté pour **{duree} min**.")
+    await send_log(interaction.guild, f"🔇 **Mute** → {member.mention}\nDurée : {duree} min | Par : {interaction.user.mention}\nRaison : {raison}", 0xE67E22)
+    asyncio.create_task(mute_member(interaction.guild, member, duree, raison))
+
+
+@bot.tree.command(name="unmute", description="Démuter un membre")
+@app_commands.default_permissions(moderate_members=True)
+@app_commands.describe(member="Le membre")
+async def unmute_cmd(interaction: discord.Interaction, member: discord.Member):
+    mute_role = interaction.guild.get_role(config["mute_role"]) if config["mute_role"] else discord.utils.get(interaction.guild.roles, name="Muted")
+    if mute_role and mute_role in member.roles:
+        await member.remove_roles(mute_role)
+        await interaction.response.send_message(f"🔊 {member.mention} démute.")
+    else:
+        await interaction.response.send_message(f"❌ {member.mention} n'est pas muté.", ephemeral=True)
+
+
+@bot.tree.command(name="kick", description="Expulser un membre")
+@app_commands.default_permissions(kick_members=True)
+@app_commands.describe(member="Le membre", raison="La raison")
+async def kick_cmd(interaction: discord.Interaction, member: discord.Member, raison: str = "Aucune raison"):
+    await member.kick(reason=raison)
+    await interaction.response.send_message(f"👢 {member.mention} expulsé.")
+    await send_log(interaction.guild, f"👢 **Kick** → {member.mention}\nPar : {interaction.user.mention} | Raison : {raison}", 0xE67E22)
+
+
+@bot.tree.command(name="ban", description="Bannir un membre")
+@app_commands.default_permissions(ban_members=True)
+@app_commands.describe(member="Le membre", raison="La raison")
+async def ban_cmd(interaction: discord.Interaction, member: discord.Member, raison: str = "Aucune raison"):
+    await member.ban(reason=raison)
+    await interaction.response.send_message(f"🔨 {member.mention} banni.")
+    await send_log(interaction.guild, f"🔨 **Ban** → {member.mention}\nPar : {interaction.user.mention} | Raison : {raison}", 0xED4245)
+
+
+@bot.tree.command(name="unban", description="Débannir un utilisateur")
+@app_commands.default_permissions(ban_members=True)
+@app_commands.describe(user_id="L'ID de l'utilisateur")
+async def unban_cmd(interaction: discord.Interaction, user_id: str):
+    try:
+        user = await bot.fetch_user(int(user_id))
+        await interaction.guild.unban(user)
+        await interaction.response.send_message(f"✅ {user.mention} débanni.", ephemeral=True)
+        await send_log(interaction.guild, f"✅ **Unban** → {user.mention} par {interaction.user.mention}", 0x57F287)
+    except:
+        await interaction.response.send_message("❌ Utilisateur introuvable ou non banni.", ephemeral=True)
+
+
+@bot.tree.command(name="clear", description="Supprimer des messages en masse")
+@app_commands.default_permissions(manage_messages=True)
+@app_commands.describe(nombre="Nombre de messages (max 100)")
+async def clear_cmd(interaction: discord.Interaction, nombre: int):
+    if not 1 <= nombre <= 100:
+        return await interaction.response.send_message("❌ Entre 1 et 100.", ephemeral=True)
+    await interaction.response.send_message(f"🗑️ Suppression...", ephemeral=True)
+    deleted = await interaction.channel.purge(limit=nombre)
+    await send_log(interaction.guild, f"🗑️ **Clear** — {len(deleted)} messages supprimés dans {interaction.channel.mention} par {interaction.user.mention}", 0xFEE75C)
+
+
+@bot.tree.command(name="userinfo", description="Infos sur un membre")
+@app_commands.describe(member="Le membre (optionnel)")
+async def userinfo(interaction: discord.Interaction, member: discord.Member = None):
+    member = member or interaction.user
+    roles = [r.mention for r in member.roles if r != interaction.guild.default_role]
+    embed = discord.Embed(title=f"👤 {member}", color=member.color)
+    embed.set_thumbnail(url=member.display_avatar.url)
+    embed.add_field(name="ID", value=str(member.id), inline=True)
+    embed.add_field(name="Pseudo", value=member.display_name, inline=True)
+    embed.add_field(name="Compte créé", value=f"<t:{int(member.created_at.timestamp())}:R>", inline=True)
+    embed.add_field(name="A rejoint", value=f"<t:{int(member.joined_at.timestamp())}:R>", inline=True)
+    embed.add_field(name=f"Rôles ({len(roles)})", value=" ".join(roles[:10]) if roles else "Aucun", inline=False)
+    embed.set_footer(text="userinfo")
+    await interaction.response.send_message(embed=embed)
+
+
+@bot.tree.command(name="serverinfo", description="Infos sur le serveur")
+async def serverinfo(interaction: discord.Interaction):
+    guild = interaction.guild
+    embed = discord.Embed(title=f"🏠 {guild.name}", color=0x5865F2)
+    embed.set_thumbnail(url=guild.icon.url if guild.icon else None)
+    embed.add_field(name="ID", value=str(guild.id), inline=True)
+    embed.add_field(name="Propriétaire", value=guild.owner.mention if guild.owner else "?", inline=True)
+    embed.add_field(name="Membres", value=str(guild.member_count), inline=True)
+    embed.add_field(name="Salons", value=str(len(guild.channels)), inline=True)
+    embed.add_field(name="Rôles", value=str(len(guild.roles)), inline=True)
+    embed.add_field(name="Boosts", value=str(guild.premium_subscription_count), inline=True)
+    embed.add_field(name="Créé le", value=f"<t:{int(guild.created_at.timestamp())}:R>", inline=True)
+    embed.set_footer(text="serverinfo")
+    await interaction.response.send_message(embed=embed)
 
 
 # ================= ON READY =================
 
 @bot.event
 async def on_ready():
-    # Ré-enregistrer les views persistantes pour que les boutons restent actifs après redémarrage
-    bot.add_view(PanelMainView())
-    bot.add_view(CloseTicketView())
-
+    bot.add_view(PanelView())
+    bot.add_view(TicketOpenView())
+    bot.add_view(TicketCloseView())
     await bot.tree.sync()
     print(f"✅ {bot.user} connecté !")
-    print(f"📋 Slash commands synchronisées")
-    print(f"🛒 Panel Slayzix Shop prêt !")
-
+    print(f"⚙️  /panel prêt")
 
 # ================= LANCEMENT =================
 
 if __name__ == "__main__":
     TOKEN = os.getenv("TOKEN")
     if not TOKEN:
-        raise ValueError("❌ TOKEN manquant dans les variables d'environnement !")
+        raise ValueError("❌ TOKEN manquant !")
     bot.run(TOKEN)
