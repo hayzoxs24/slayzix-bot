@@ -2,16 +2,14 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 import sqlite3, time, re, random, json, os
-from dotenv import load_dotenv
 
-load_dotenv()
-TOKEN = os.getenv("TOKEN")
+TOKEN = os.environ.get("TOKEN")
 
 COLOR = 0x5865F2
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
-tree = bot.tree  # Slash command tree
+tree = bot.tree
 
 # ============================================================
 # BASE DE DONNÉES
@@ -115,6 +113,7 @@ LOGS = {
 async def on_ready():
     print(f"✅ Connecté : {bot.user}")
     bot.add_view(TicketView())
+    bot.add_view(CloseTicketView())
     if not giveaway_loop.is_running():
         giveaway_loop.start()
     try:
@@ -243,7 +242,7 @@ async def warn(interaction: discord.Interaction, membre: discord.Member, raison:
             title=f"⚠️ Avertissement sur {interaction.guild.name}",
             description=f"**Raison :** {raison}",
             color=0xffaa00))
-    except:
+    except Exception:
         pass
 
 @tree.command(name="clear", description="Supprimer des messages en masse")
@@ -290,7 +289,7 @@ async def notes(interaction: discord.Interaction, membre: discord.Member):
         title=f"📝 Notes de {membre}", description=txt, color=COLOR), ephemeral=True)
 
 # ============================================================
-# ANTIRAID
+# ANTIRAID COMMANDES
 # ============================================================
 
 @tree.command(name="antibot", description="Activer/désactiver l'antibot")
@@ -593,7 +592,7 @@ async def reroll(interaction: discord.Interaction):
                     winner = random.choice(users)
                     return await interaction.response.send_message(
                         f"🎉 Nouveau gagnant : {winner.mention}")
-            except:
+            except Exception:
                 pass
     await interaction.response.send_message("❌ Aucun giveaway terminé trouvé dans ce salon.")
 
@@ -628,7 +627,7 @@ async def before_giveaway():
     await bot.wait_until_ready()
 
 # ============================================================
-# LOGS
+# LOGS COMMANDES
 # ============================================================
 
 @tree.command(name="modlog", description="Configurer le salon de log de modération")
@@ -776,10 +775,7 @@ BACKUP_DIR = "backups"
 os.makedirs(BACKUP_DIR, exist_ok=True)
 
 @tree.command(name="backup", description="Gérer les backups du serveur")
-@app_commands.describe(
-    action="Action à effectuer",
-    nom="Nom de la backup"
-)
+@app_commands.describe(action="Action à effectuer", nom="Nom de la backup")
 @app_commands.choices(action=[
     app_commands.Choice(name="Créer", value="server"),
     app_commands.Choice(name="Lister", value="list"),
@@ -907,5 +903,8 @@ async def help_cmd(interaction: discord.Interaction):
 # ============================================================
 # LANCEMENT
 # ============================================================
+
+if not TOKEN:
+    raise ValueError("❌ La variable d'environnement TOKEN est manquante !")
 
 bot.run(TOKEN)
