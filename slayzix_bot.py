@@ -1,6 +1,9 @@
 import discord
 from discord.ext import commands
 import os
+import asyncio
+import random
+from datetime import datetime, timedelta
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
@@ -18,6 +21,7 @@ ticket_config = {
 }
 
 open_tickets = {}  # {user_id: channel_id}
+active_giveaways = {}  # {message_id: giveaway_data}
 
 # ================= CLOSE TICKET =================
 
@@ -51,7 +55,6 @@ class CloseTicketView(discord.ui.View):
                 break
 
         await interaction.response.send_message("Fermeture dans 3 secondes...", ephemeral=True)
-        import asyncio
         await asyncio.sleep(3)
         await interaction.channel.delete()
 
@@ -150,6 +153,14 @@ class TicketPanel(discord.ui.View):
     async def signalement(self, interaction: discord.Interaction, button: discord.ui.Button):
         await open_ticket_for(interaction, "Signalement")
 
+    @discord.ui.button(label="🤝 Partenariat", style=discord.ButtonStyle.primary, custom_id="ticket_partenariat", row=1)
+    async def partenariat(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await open_ticket_for(interaction, "Partenariat")
+
+    @discord.ui.button(label="🎉 Giveaway", style=discord.ButtonStyle.success, custom_id="ticket_giveaway", row=1)
+    async def giveaway_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await open_ticket_for(interaction, "Giveaway")
+
 # ================= CONFIG SELECTS =================
 
 class TicketCategorySelect(discord.ui.ChannelSelect):
@@ -190,7 +201,9 @@ class SendPanelView(discord.ui.View):
                 "🎫 **Général** — Question générale\n"
                 "❓ **Support** — Problème / aide\n"
                 "💰 **Commande** — Passer une commande\n"
-                "⚠️ **Signalement** — Signaler un problème\n\n"
+                "⚠️ **Signalement** — Signaler un problème\n"
+                "🤝 **Partenariat** — Proposer un partenariat\n"
+                "🎉 **Giveaway** — Organiser un giveaway\n\n"
                 "⚡ Réponse rapide garantie !"
             ),
             color=discord.Color.blurple()
@@ -224,6 +237,188 @@ async def createticket(interaction: discord.Interaction):
     )
     await interaction.response.send_message(embed=embed, view=TicketConfigView(), ephemeral=True)
     await interaction.followup.send("📨 Envoyer le panel :", view=SendPanelView(), ephemeral=True)
+
+# ================= GIVEAWAY =================
+
+class GiveawayView(discord.ui.View):
+    def __init__(self, giveaway_id: int):
+        super().__init__(timeout=None)
+        self.giveaway_id = giveaway_id
+
+    @discord.ui.button(label="🎉 Participer", style=discord.ButtonStyle.success, custom_id="giveaway_join")
+    async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.giveaway_id not in active_giveaways:
+            return await interaction.response.send_message("❌ Ce giveaway est terminé.", ephemeral=True)
+
+        giveaway = active_giveaways[self.giveaway_id]
+
+        if interaction.user.id in giveaway["participants"]:
+            giveaway["participants"].discard(interaction.user.id)
+            count = len(giveaway["participants"])
+            button.label = f"🎉 Participer — {count}"
+            await interaction.message.edit(view=self)
+            return await interaction.response.send_message("❌ Tu t'es retiré du giveaway.", ephemeral=True)
+
+        giveaway["participants"].add(interaction.user.id)
+        count = len(giveaway["participants"])
+        button.label = f"🎉 Participer — {count}"
+        await interaction.message.edit(view=self)
+        await interaction.response.send_message("✅ Tu participes au giveaway ! Bonne chance 🍀", ephemeral=True)
+
+
+async def end_giveaway(channel_id: int, message_id: int, guild: discord.Guild):
+    await asyncio.sleep(0.1)
+
+    if message_id not in active_giveaways:
+        return
+
+    giveaway = active_giveaways[message_id]
+    channel = guild.get_channel(channel_id)
+    if not channel:
+        return
+
+    try:
+        message = await channel.fetch_message(message_id)
+    except:
+        return
+
+    participants = list(giveaway["participants"])
+    winners_count = giveaway["winners"]
+    prize = giveaway["prize"]
+    host = giveaway["host"]
+
+    if not participants:
+        embed = discord.Embed(
+            title="🎉 GIVEAWAY TERMINÉ",
+            description=(
+                f"**Prix :** {prize}\n"
+                f"**Organisateur :** <@{host}>\n\n"
+                f"😔 Personne n'a participé... Pas de gagnant !"
+            ),
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="Slayzix Shop • Giveaway terminé")
+        embed.timestamp = discord.utils.utcnow()
+        await message.edit(embed=embed, view=None)
+        await channel.send("😔 Aucun participant, pas de gagnant pour ce giveaway !")
+        del active_giveaways[message_id]
+        return
+
+    winners = random.sample(participants, min(winners_count, len(participants)))
+    winners_mentions = " ".join([f"<@{w}>" for w in winners])
+
+    embed = discord.Embed(
+        title="🎉 GIVEAWAY TERMINÉ",
+        description=(
+            f"**Prix :** {prize}\n"
+            f"**Gagnant(s) :** {winners_mentions}\n"
+            f"**Organisateur :** <@{host}>\n"
+            f"**Participants :** {len(participants)}"
+        ),
+        color=discord.Color.gold()
+    )
+    embed.set_footer(text="Slayzix Shop • Giveaway terminé")
+    embed.timestamp = discord.utils.utcnow()
+
+    await message.edit(embed=embed, view=None)
+    await channel.send(
+        f"🎊 Félicitations {winners_mentions} ! Tu as gagné **{prize}** !\n"
+        f"Contacte <@{host}> pour récupérer ton prix."
+    )
+
+    del active_giveaways[message_id]
+
+
+@bot.tree.command(name="giveaway", description="Lance un giveaway !")
+@discord.app_commands.describe(
+    duree="Durée du giveaway (ex: 10s, 5m, 1h, 2d)",
+    gagnants="Nombre de gagnants",
+    prix="Ce que tu fais gagner"
+)
+@discord.app_commands.checks.has_permissions(manage_guild=True)
+async def giveaway(interaction: discord.Interaction, duree: str, gagnants: int, prix: str):
+
+    # Parse durée
+    try:
+        unit = duree[-1].lower()
+        value = int(duree[:-1])
+        multipliers = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+        if unit not in multipliers:
+            raise ValueError
+        seconds = value * multipliers[unit]
+    except:
+        return await interaction.response.send_message(
+            "❌ Format invalide. Exemples : `30s`, `5m`, `1h`, `2d`", ephemeral=True
+        )
+
+    if gagnants < 1:
+        return await interaction.response.send_message("❌ Minimum 1 gagnant.", ephemeral=True)
+
+    end_time = datetime.utcnow() + timedelta(seconds=seconds)
+    end_timestamp = int(end_time.timestamp())
+
+    embed = discord.Embed(
+        title="🎉 GIVEAWAY",
+        description=(
+            f"**Prix :** {prix}\n"
+            f"**Gagnant(s) :** {gagnants}\n"
+            f"**Organisateur :** {interaction.user.mention}\n"
+            f"**Fin :** <t:{end_timestamp}:R> (<t:{end_timestamp}:f>)\n\n"
+            f"Clique sur 🎉 pour participer !"
+        ),
+        color=discord.Color.blurple()
+    )
+    embed.set_footer(text="Slayzix Shop • Giveaway")
+    embed.timestamp = discord.utils.utcnow()
+
+    await interaction.response.send_message("✅ Giveaway lancé !", ephemeral=True)
+    msg = await interaction.channel.send(embed=embed)
+
+    active_giveaways[msg.id] = {
+        "prize": prix,
+        "winners": gagnants,
+        "host": interaction.user.id,
+        "participants": set(),
+        "end_time": end_timestamp,
+        "channel_id": interaction.channel.id
+    }
+
+    view = GiveawayView(msg.id)
+    await msg.edit(view=view)
+
+    # Timer
+    await asyncio.sleep(seconds)
+    await end_giveaway(interaction.channel.id, msg.id, interaction.guild)
+
+
+@bot.tree.command(name="reroll", description="Retirer un nouveau gagnant pour un giveaway terminé")
+@discord.app_commands.describe(message_id="L'ID du message du giveaway terminé")
+@discord.app_commands.checks.has_permissions(manage_guild=True)
+async def reroll(interaction: discord.Interaction, message_id: str):
+    try:
+        msg = await interaction.channel.fetch_message(int(message_id))
+    except:
+        return await interaction.response.send_message("❌ Message introuvable.", ephemeral=True)
+
+    # Récupérer les participants depuis l'embed (reroll basique)
+    await interaction.response.send_message(
+        "🎲 Nouveau tirage... mais les participants ne sont plus disponibles après la fin.\n"
+        "Utilise `/giveaway` pour relancer un nouveau giveaway !",
+        ephemeral=True
+    )
+
+
+@bot.tree.command(name="giveawayend", description="Terminer un giveaway en cours manuellement")
+@discord.app_commands.describe(message_id="L'ID du message du giveaway")
+@discord.app_commands.checks.has_permissions(manage_guild=True)
+async def giveawayend(interaction: discord.Interaction, message_id: str):
+    msg_id = int(message_id)
+    if msg_id not in active_giveaways:
+        return await interaction.response.send_message("❌ Giveaway introuvable ou déjà terminé.", ephemeral=True)
+
+    await interaction.response.send_message("✅ Giveaway terminé manuellement !", ephemeral=True)
+    await end_giveaway(interaction.channel.id, msg_id, interaction.guild)
+
 
 # ================= VOUCH =================
 
