@@ -13,6 +13,9 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 vouch_channel_id = None
 vouch_role_id = None
 
+welcome_channel_id = None
+goodbye_channel_id = None
+
 ticket_config = {
     "category": None,
     "log_channel": None,
@@ -22,6 +25,111 @@ ticket_config = {
 
 open_tickets = {}  # {user_id: channel_id}
 active_giveaways = {}  # {message_id: giveaway_data}
+
+# ================= WELCOME / GOODBYE EVENTS =================
+
+@bot.event
+async def on_member_join(member):
+    if not welcome_channel_id:
+        return
+    channel = member.guild.get_channel(welcome_channel_id)
+    if not channel:
+        return
+
+    member_count = member.guild.member_count
+    embed = discord.Embed(
+        title="🎉 Bienvenue sur le serveur !",
+        description=(
+            f"Salut {member.mention}, on est ravis de t'accueillir sur **{member.guild.name}** ! 🙌\n\n"
+            f"Tu es le **{member_count}ème** membre à nous rejoindre.\n\n"
+            "──────────────────────\n"
+            "🛒 Consulte nos services et passe ta commande !\n"
+            "💬 Notre équipe est là pour t'aider."
+        ),
+        color=discord.Color.green()
+    )
+    embed.set_thumbnail(url=member.display_avatar.url)
+    embed.set_footer(text=f"Slayzix Shop • Bienvenue parmi nous ! • {discord.utils.utcnow().strftime('%d/%m/%Y %H:%M')}")
+    await channel.send(embed=embed)
+
+@bot.event
+async def on_member_remove(member):
+    if not goodbye_channel_id:
+        return
+    channel = member.guild.get_channel(goodbye_channel_id)
+    if not channel:
+        return
+
+    member_count = member.guild.member_count
+    embed = discord.Embed(
+        title="👋 Départ du serveur",
+        description=(
+            f"**{member.name}** vient de quitter **{member.guild.name}**...\n\n"
+            f"Il reste désormais **{member_count} membres** sur le serveur.\n\n"
+            "──────────────────────\n"
+            "😊 On espère te revoir bientôt !"
+        ),
+        color=discord.Color.red()
+    )
+    embed.set_thumbnail(url=member.display_avatar.url)
+    embed.set_footer(text=f"Slayzix Shop • À bientôt ! • {discord.utils.utcnow().strftime('%d/%m/%Y %H:%M')}")
+    await channel.send(embed=embed)
+
+# ================= !welcome =================
+
+class WelcomeChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self):
+        super().__init__(placeholder="Choisis le salon de bienvenue", channel_types=[discord.ChannelType.text])
+
+    async def callback(self, interaction: discord.Interaction):
+        global welcome_channel_id
+        welcome_channel_id = self.values[0].id
+        await interaction.response.send_message(
+            f"✅ Salon de bienvenue défini : {self.values[0].mention}", ephemeral=True
+        )
+
+class WelcomeSetupView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(WelcomeChannelSelect())
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def welcome(ctx):
+    embed = discord.Embed(
+        title="⚙️ Configuration — Salon de bienvenue",
+        description="Sélectionne le salon où les messages de bienvenue seront envoyés.",
+        color=discord.Color.green()
+    )
+    await ctx.send(embed=embed, view=WelcomeSetupView())
+
+# ================= !goodbye =================
+
+class GoodbyeChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self):
+        super().__init__(placeholder="Choisis le salon d'au revoir", channel_types=[discord.ChannelType.text])
+
+    async def callback(self, interaction: discord.Interaction):
+        global goodbye_channel_id
+        goodbye_channel_id = self.values[0].id
+        await interaction.response.send_message(
+            f"✅ Salon d'au revoir défini : {self.values[0].mention}", ephemeral=True
+        )
+
+class GoodbyeSetupView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(GoodbyeChannelSelect())
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def goodbye(ctx):
+    embed = discord.Embed(
+        title="⚙️ Configuration — Salon d'au revoir",
+        description="Sélectionne le salon où les messages d'au revoir seront envoyés.",
+        color=discord.Color.red()
+    )
+    await ctx.send(embed=embed, view=GoodbyeSetupView())
 
 # ================= CLOSE TICKET =================
 
@@ -131,35 +239,35 @@ async def open_ticket_for(interaction: discord.Interaction, ticket_type: str = "
         f"✅ Ton ticket a été créé → {channel.mention}", ephemeral=True
     )
 
-# ================= TICKET PANEL BUTTONS =================
+# ================= TICKET PANEL — SELECT MENU =================
+
+TICKET_OPTIONS = [
+    discord.SelectOption(label="Général",      emoji="🎫", description="Question générale",         value="Général"),
+    discord.SelectOption(label="Support",      emoji="❓", description="Problème / aide",            value="Support"),
+    discord.SelectOption(label="Commande",     emoji="💰", description="Passer une commande",        value="Commande"),
+    discord.SelectOption(label="Signalement",  emoji="⚠️", description="Signaler un problème",       value="Signalement"),
+    discord.SelectOption(label="Partenariat",  emoji="🤝", description="Proposer un partenariat",    value="Partenariat"),
+    discord.SelectOption(label="Giveaway",     emoji="🎉", description="Organiser un giveaway",      value="Giveaway"),
+    discord.SelectOption(label="Récompense",   emoji="🏆", description="Réclamer une récompense",    value="Récompense"),
+]
+
+class TicketSelect(discord.ui.Select):
+    def __init__(self):
+        super().__init__(
+            placeholder="📂 Choisis le type de ticket...",
+            min_values=1,
+            max_values=1,
+            options=TICKET_OPTIONS,
+            custom_id="ticket_select"
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        await open_ticket_for(interaction, self.values[0])
 
 class TicketPanel(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
-
-    @discord.ui.button(label="🎫 Général", style=discord.ButtonStyle.primary, custom_id="ticket_general")
-    async def general(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await open_ticket_for(interaction, "Général")
-
-    @discord.ui.button(label="❓ Support", style=discord.ButtonStyle.secondary, custom_id="ticket_support")
-    async def support(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await open_ticket_for(interaction, "Support")
-
-    @discord.ui.button(label="💰 Commande", style=discord.ButtonStyle.success, custom_id="ticket_commande")
-    async def commande(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await open_ticket_for(interaction, "Commande")
-
-    @discord.ui.button(label="⚠️ Signalement", style=discord.ButtonStyle.danger, custom_id="ticket_signalement")
-    async def signalement(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await open_ticket_for(interaction, "Signalement")
-
-    @discord.ui.button(label="🤝 Partenariat", style=discord.ButtonStyle.primary, custom_id="ticket_partenariat", row=1)
-    async def partenariat(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await open_ticket_for(interaction, "Partenariat")
-
-    @discord.ui.button(label="🎉 Giveaway", style=discord.ButtonStyle.success, custom_id="ticket_giveaway", row=1)
-    async def giveaway_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await open_ticket_for(interaction, "Giveaway")
+        self.add_item(TicketSelect())
 
 # ================= CONFIG SELECTS =================
 
@@ -197,13 +305,14 @@ class SendPanelView(discord.ui.View):
             title="🎫 SLAYZIX SHOP — Ouvre un ticket",
             description=(
                 "Tu as besoin d'aide ou tu veux passer une commande ?\n"
-                "Clique sur le bouton correspondant à ta demande !\n\n"
+                "Sélectionne le type de ta demande dans le menu ci-dessous !\n\n"
                 "🎫 **Général** — Question générale\n"
                 "❓ **Support** — Problème / aide\n"
                 "💰 **Commande** — Passer une commande\n"
                 "⚠️ **Signalement** — Signaler un problème\n"
                 "🤝 **Partenariat** — Proposer un partenariat\n"
-                "🎉 **Giveaway** — Organiser un giveaway\n\n"
+                "🎉 **Giveaway** — Organiser un giveaway\n"
+                "🏆 **Récompense** — Réclamer une récompense\n\n"
                 "⚡ Réponse rapide garantie !"
             ),
             color=discord.Color.blurple()
@@ -338,7 +447,6 @@ async def end_giveaway(channel_id: int, message_id: int, guild: discord.Guild):
 @discord.app_commands.checks.has_permissions(manage_guild=True)
 async def giveaway(interaction: discord.Interaction, duree: str, gagnants: int, prix: str):
 
-    # Parse durée
     try:
         unit = duree[-1].lower()
         value = int(duree[:-1])
@@ -386,7 +494,6 @@ async def giveaway(interaction: discord.Interaction, duree: str, gagnants: int, 
     view = GiveawayView(msg.id)
     await msg.edit(view=view)
 
-    # Timer
     await asyncio.sleep(seconds)
     await end_giveaway(interaction.channel.id, msg.id, interaction.guild)
 
@@ -400,7 +507,6 @@ async def reroll(interaction: discord.Interaction, message_id: str):
     except:
         return await interaction.response.send_message("❌ Message introuvable.", ephemeral=True)
 
-    # Récupérer les participants depuis l'embed (reroll basique)
     await interaction.response.send_message(
         "🎲 Nouveau tirage... mais les participants ne sont plus disponibles après la fin.\n"
         "Utilise `/giveaway` pour relancer un nouveau giveaway !",
