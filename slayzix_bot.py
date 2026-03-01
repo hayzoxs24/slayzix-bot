@@ -3,7 +3,6 @@ from discord.ext import commands
 import os
 import asyncio
 import random
-import anthropic
 from datetime import datetime, timedelta
 
 intents = discord.Intents.all()
@@ -561,33 +560,6 @@ async def say(interaction: discord.Interaction, message: str, salon: discord.Tex
     target = salon or interaction.channel
     await target.send(message)
     await interaction.response.send_message(f"✅ Message envoyé dans {target.mention}.", ephemeral=True)
-
-
-# ================= /ia =================
-
-@bot.tree.command(name="ia", description="Pose une question à l'IA Claude")
-@discord.app_commands.describe(question="Ta question pour l'IA")
-async def ia(interaction: discord.Interaction, question: str):
-    await interaction.response.defer()
-    try:
-        client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-        response = client.messages.create(
-            model="claude-opus-4-6",
-            max_tokens=1024,
-            messages=[{"role": "user", "content": question}]
-        )
-        answer = response.content[0].text
-
-        embed = discord.Embed(title="🤖 Claude IA", color=discord.Color.blurple())
-        embed.add_field(name="❓ Question", value=question[:1024], inline=False)
-        if len(answer) > 1024:
-            answer = answer[:1021] + "..."
-        embed.add_field(name="💬 Réponse", value=answer, inline=False)
-        embed.set_footer(text=f"Demandé par {interaction.user.name} • Slayzix Shop")
-        embed.timestamp = discord.utils.utcnow()
-        await interaction.followup.send(embed=embed)
-    except Exception as e:
-        await interaction.followup.send(f"❌ Erreur IA : `{e}`", ephemeral=True)
 
 
 # ================= /embed =================
