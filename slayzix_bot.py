@@ -495,7 +495,12 @@ def build_embed(session: dict, username: str) -> discord.Embed:
     auteur_nom = session.get("auteur_nom", "")
     auteur_icon = session.get("auteur_icon", "")
     if auteur_nom:
-        embed.set_author(name=auteur_nom, icon_url=auteur_icon if auteur_icon.startswith("http") else discord.utils.MISSING)
+        if auteur_icon.startswith("http"):
+            embed.set_author(name=auteur_nom, icon_url=auteur_icon)
+        else:
+            embed.set_author(name=auteur_nom)
+
+
 
     thumb = session.get("thumbnail", "")
     if thumb.startswith("http"):
