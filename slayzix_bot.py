@@ -15,7 +15,7 @@ vouch_role_id = None
 welcome_channel_id = None
 goodbye_channel_id = None
 autoping_channel_id = None
-invite_log_channel_id = None
+autodiscret_channel_id = None
 
 ticket_config = {
     "category": None,
@@ -26,7 +26,6 @@ ticket_config = {
 
 open_tickets = {}       # {user_id: channel_id}
 active_giveaways = {}   # {message_id: giveaway_data}
-guild_invites = {}      # {invite_code: uses}
 
 # ================= WELCOME / GOODBYE =================
 
@@ -40,6 +39,17 @@ async def on_member_join(member):
                 f"👋 Bienvenue {member.mention} sur **{member.guild.name}** !",
                 allowed_mentions=discord.AllowedMentions(users=True)
             )
+
+    # ── Autodiscret ──
+    if autodiscret_channel_id:
+        ping_channel = member.guild.get_channel(autodiscret_channel_id)
+        if ping_channel:
+            msg = await ping_channel.send(
+                f"👋 Bienvenue {member.mention} sur **{member.guild.name}** !",
+                allowed_mentions=discord.AllowedMentions(users=True)
+            )
+            await asyncio.sleep(1)
+            await msg.delete()
 
     # ── Welcome embed ──
     if welcome_channel_id:
@@ -67,37 +77,6 @@ async def on_member_join(member):
                 embed=embed,
                 allowed_mentions=discord.AllowedMentions(users=True)
             )
-
-    # ── Invite log ──
-    if invite_log_channel_id:
-        log_channel = member.guild.get_channel(invite_log_channel_id)
-        if log_channel:
-            try:
-                new_invites = await member.guild.fetch_invites()
-                inviter = None
-                for inv in new_invites:
-                    old_uses = guild_invites.get(inv.code, 0)
-                    if inv.uses > old_uses:
-                        inviter = inv.inviter
-                        guild_invites[inv.code] = inv.uses
-                        break
-                for inv in new_invites:
-                    guild_invites[inv.code] = inv.uses
-
-                inv_embed = discord.Embed(
-                    title="📨 Nouveau membre",
-                    description=(
-                        f"**Membre :** {member.mention} (`{member.name}`)\n"
-                        f"**Invité par :** {inviter.mention if inviter else 'Inconnu'}\n"
-                        f"**Compte créé :** <t:{int(member.created_at.timestamp())}:R>"
-                    ),
-                    color=discord.Color.green()
-                )
-                inv_embed.set_thumbnail(url=member.display_avatar.url)
-                inv_embed.timestamp = discord.utils.utcnow()
-                await log_channel.send(embed=inv_embed)
-            except Exception:
-                pass
 
 
 @bot.event
@@ -516,39 +495,49 @@ async def autoping(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, view=AutopingView(), ephemeral=True)
 
 
-# ================= /invitelog =================
+# ================= /autopingdelete =================
 
-class InviteLogChannelSelect(discord.ui.ChannelSelect):
+@bot.tree.command(name="autopingdelete", description="Désactive l'autoping (supprime le salon configuré)")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def autopingdelete(interaction: discord.Interaction):
+    global autoping_channel_id
+    if autoping_channel_id is None:
+        return await interaction.response.send_message(
+            "❌ Aucun autoping n'est configuré.", ephemeral=True
+        )
+    autoping_channel_id = None
+    await interaction.response.send_message(
+        "✅ Autoping désactivé.", ephemeral=True
+    )
+
+
+# ================= /autodiscret =================
+
+class AutodiscretChannelSelect(discord.ui.ChannelSelect):
     def __init__(self):
-        super().__init__(placeholder="Choisis le salon des logs d'invite", channel_types=[discord.ChannelType.text])
+        super().__init__(placeholder="Choisis le salon autodiscret", channel_types=[discord.ChannelType.text])
 
     async def callback(self, interaction: discord.Interaction):
-        global invite_log_channel_id
-        invite_log_channel_id = self.values[0].id
-        try:
-            invites = await interaction.guild.fetch_invites()
-            for inv in invites:
-                guild_invites[inv.code] = inv.uses
-        except Exception:
-            pass
+        global autodiscret_channel_id
+        autodiscret_channel_id = self.values[0].id
         await interaction.response.send_message(
-            f"✅ Logs d'invitations définis : {self.values[0].mention}", ephemeral=True
+            f"✅ Autodiscret activé dans {self.values[0].mention}", ephemeral=True
         )
 
-class InviteLogView(discord.ui.View):
+class AutodiscretView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
-        self.add_item(InviteLogChannelSelect())
+        self.add_item(AutodiscretChannelSelect())
 
-@bot.tree.command(name="invitelog", description="Définit le salon pour les logs d'invitation")
+@bot.tree.command(name="autodiscret", description="Ping discret : envoie le ping puis supprime le message après 1s")
 @discord.app_commands.checks.has_permissions(administrator=True)
-async def invitelog(interaction: discord.Interaction):
+async def autodiscret(interaction: discord.Interaction):
     embed = discord.Embed(
-        title="⚙️ Configuration — Logs d'invitations",
-        description="Sélectionne le salon où seront enregistrés les logs d'invitations.",
+        title="⚙️ Configuration — Autodiscret",
+        description="Le bot pingera le membre avec un message de bienvenue puis le supprimera aussitôt.",
         color=discord.Color.blurple()
     )
-    await interaction.response.send_message(embed=embed, view=InviteLogView(), ephemeral=True)
+    await interaction.response.send_message(embed=embed, view=AutodiscretView(), ephemeral=True)
 
 
 # ================= /say =================
