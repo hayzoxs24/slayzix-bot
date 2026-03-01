@@ -3,6 +3,7 @@ from discord.ext import commands
 import os
 import asyncio
 import random
+import anthropic
 from datetime import datetime, timedelta
 
 intents = discord.Intents.all()
@@ -12,9 +13,10 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 vouch_channel_id = None
 vouch_role_id = None
-
 welcome_channel_id = None
 goodbye_channel_id = None
+autoping_channel_id = None
+invite_log_channel_id = None
 
 ticket_config = {
     "category": None,
@@ -23,34 +25,81 @@ ticket_config = {
     "welcome_message": "Bienvenue ! Un membre du staff va vous répondre rapidement.",
 }
 
-open_tickets = {}  # {user_id: channel_id}
-active_giveaways = {}  # {message_id: giveaway_data}
+open_tickets = {}       # {user_id: channel_id}
+active_giveaways = {}   # {message_id: giveaway_data}
+guild_invites = {}      # {invite_code: uses}
 
-# ================= WELCOME / GOODBYE EVENTS =================
+# ================= WELCOME / GOODBYE =================
 
 @bot.event
 async def on_member_join(member):
-    if not welcome_channel_id:
-        return
-    channel = member.guild.get_channel(welcome_channel_id)
-    if not channel:
-        return
+    # ── Autoping ──
+    if autoping_channel_id:
+        ping_channel = member.guild.get_channel(autoping_channel_id)
+        if ping_channel:
+            await ping_channel.send(
+                f"👋 Bienvenue {member.mention} sur **{member.guild.name}** !",
+                allowed_mentions=discord.AllowedMentions(users=True)
+            )
 
-    member_count = member.guild.member_count
-    embed = discord.Embed(
-        title="🎉 Bienvenue sur le serveur !",
-        description=(
-            f"Salut {member.mention}, on est ravis de t'accueillir sur **{member.guild.name}** ! 🙌\n\n"
-            f"Tu es le **{member_count}ème** membre à nous rejoindre.\n\n"
-            "──────────────────────\n"
-            "🛒 Consulte nos services et passe ta commande !\n"
-            "💬 Notre équipe est là pour t'aider."
-        ),
-        color=discord.Color.green()
-    )
-    embed.set_thumbnail(url=member.display_avatar.url)
-    embed.set_footer(text=f"Slayzix Shop • Bienvenue parmi nous ! • {discord.utils.utcnow().strftime('%d/%m/%Y %H:%M')}")
-    await channel.send(embed=embed)
+    # ── Welcome embed ──
+    if welcome_channel_id:
+        channel = member.guild.get_channel(welcome_channel_id)
+        if channel:
+            member_count = member.guild.member_count
+            embed = discord.Embed(
+                title="🎉 Bienvenue sur le serveur !",
+                description=(
+                    f"Salut {member.mention}, on est ravis de t'accueillir sur **{member.guild.name}** ! 🙌\n\n"
+                    f"Tu es le **{member_count}ème** membre à nous rejoindre.\n\n"
+                    "──────────────────────\n"
+                    "🛒 Consulte nos services et passe ta commande !\n"
+                    "💬 Notre équipe est là pour t'aider."
+                ),
+                color=discord.Color.green()
+            )
+            embed.set_thumbnail(url=member.display_avatar.url)
+            embed.set_footer(
+                text=f"Slayzix Shop • Bienvenue parmi nous ! • {discord.utils.utcnow().strftime('%d/%m/%Y %H:%M')}"
+            )
+            # content= permet le vrai ping en dehors de l'embed
+            await channel.send(
+                content=member.mention,
+                embed=embed,
+                allowed_mentions=discord.AllowedMentions(users=True)
+            )
+
+    # ── Invite log ──
+    if invite_log_channel_id:
+        log_channel = member.guild.get_channel(invite_log_channel_id)
+        if log_channel:
+            try:
+                new_invites = await member.guild.fetch_invites()
+                inviter = None
+                for inv in new_invites:
+                    old_uses = guild_invites.get(inv.code, 0)
+                    if inv.uses > old_uses:
+                        inviter = inv.inviter
+                        guild_invites[inv.code] = inv.uses
+                        break
+                for inv in new_invites:
+                    guild_invites[inv.code] = inv.uses
+
+                inv_embed = discord.Embed(
+                    title="📨 Nouveau membre",
+                    description=(
+                        f"**Membre :** {member.mention} (`{member.name}`)\n"
+                        f"**Invité par :** {inviter.mention if inviter else 'Inconnu'}\n"
+                        f"**Compte créé :** <t:{int(member.created_at.timestamp())}:R>"
+                    ),
+                    color=discord.Color.green()
+                )
+                inv_embed.set_thumbnail(url=member.display_avatar.url)
+                inv_embed.timestamp = discord.utils.utcnow()
+                await log_channel.send(embed=inv_embed)
+            except Exception:
+                pass
+
 
 @bot.event
 async def on_member_remove(member):
@@ -72,8 +121,11 @@ async def on_member_remove(member):
         color=discord.Color.red()
     )
     embed.set_thumbnail(url=member.display_avatar.url)
-    embed.set_footer(text=f"Slayzix Shop • À bientôt ! • {discord.utils.utcnow().strftime('%d/%m/%Y %H:%M')}")
+    embed.set_footer(
+        text=f"Slayzix Shop • À bientôt ! • {discord.utils.utcnow().strftime('%d/%m/%Y %H:%M')}"
+    )
     await channel.send(embed=embed)
+
 
 # ================= !welcome =================
 
@@ -103,6 +155,7 @@ async def welcome(ctx):
     )
     await ctx.send(embed=embed, view=WelcomeSetupView())
 
+
 # ================= !goodbye =================
 
 class GoodbyeChannelSelect(discord.ui.ChannelSelect):
@@ -130,6 +183,7 @@ async def goodbye(ctx):
         color=discord.Color.red()
     )
     await ctx.send(embed=embed, view=GoodbyeSetupView())
+
 
 # ================= CLOSE TICKET =================
 
@@ -165,6 +219,7 @@ class CloseTicketView(discord.ui.View):
         await interaction.response.send_message("Fermeture dans 3 secondes...", ephemeral=True)
         await asyncio.sleep(3)
         await interaction.channel.delete()
+
 
 # ================= OPEN TICKET =================
 
@@ -239,16 +294,17 @@ async def open_ticket_for(interaction: discord.Interaction, ticket_type: str = "
         f"✅ Ton ticket a été créé → {channel.mention}", ephemeral=True
     )
 
+
 # ================= TICKET PANEL — SELECT MENU =================
 
 TICKET_OPTIONS = [
-    discord.SelectOption(label="Général",      emoji="🎫", description="Question générale",         value="Général"),
-    discord.SelectOption(label="Support",      emoji="❓", description="Problème / aide",            value="Support"),
-    discord.SelectOption(label="Commande",     emoji="💰", description="Passer une commande",        value="Commande"),
-    discord.SelectOption(label="Signalement",  emoji="⚠️", description="Signaler un problème",       value="Signalement"),
-    discord.SelectOption(label="Partenariat",  emoji="🤝", description="Proposer un partenariat",    value="Partenariat"),
-    discord.SelectOption(label="Giveaway",     emoji="🎉", description="Organiser un giveaway",      value="Giveaway"),
-    discord.SelectOption(label="Récompense",   emoji="🏆", description="Réclamer une récompense",    value="Récompense"),
+    discord.SelectOption(label="Général",     emoji="🎫", description="Question générale",        value="Général"),
+    discord.SelectOption(label="Support",     emoji="❓", description="Problème / aide",           value="Support"),
+    discord.SelectOption(label="Commande",    emoji="💰", description="Passer une commande",       value="Commande"),
+    discord.SelectOption(label="Signalement", emoji="⚠️", description="Signaler un problème",      value="Signalement"),
+    discord.SelectOption(label="Partenariat", emoji="🤝", description="Proposer un partenariat",   value="Partenariat"),
+    discord.SelectOption(label="Giveaway",    emoji="🎉", description="Organiser un giveaway",     value="Giveaway"),
+    discord.SelectOption(label="Récompense",  emoji="🏆", description="Réclamer une récompense",   value="Récompense"),
 ]
 
 class TicketSelect(discord.ui.Select):
@@ -268,6 +324,7 @@ class TicketPanel(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(TicketSelect())
+
 
 # ================= CONFIG SELECTS =================
 
@@ -328,8 +385,6 @@ class TicketConfigView(discord.ui.View):
         self.add_item(TicketLogSelect())
         self.add_item(TicketRoleSelect())
 
-# ================= /createticket =================
-
 @bot.tree.command(name="createticket", description="Configure et envoie le panel de tickets")
 @discord.app_commands.checks.has_permissions(administrator=True)
 async def createticket(interaction: discord.Interaction):
@@ -346,6 +401,235 @@ async def createticket(interaction: discord.Interaction):
     )
     await interaction.response.send_message(embed=embed, view=TicketConfigView(), ephemeral=True)
     await interaction.followup.send("📨 Envoyer le panel :", view=SendPanelView(), ephemeral=True)
+
+
+# ================= MODÉRATION =================
+
+@bot.tree.command(name="clear", description="Supprime des messages dans ce salon")
+@discord.app_commands.describe(nombre="Nombre de messages à supprimer (1-100)")
+@discord.app_commands.checks.has_permissions(manage_messages=True)
+async def clear(interaction: discord.Interaction, nombre: int = 10):
+    if nombre < 1 or nombre > 100:
+        return await interaction.response.send_message("❌ Entre 1 et 100 messages.", ephemeral=True)
+    await interaction.response.defer(ephemeral=True)
+    deleted = await interaction.channel.purge(limit=nombre)
+    await interaction.followup.send(f"🗑️ **{len(deleted)}** message(s) supprimé(s).", ephemeral=True)
+
+
+@bot.tree.command(name="ban", description="Bannir un membre du serveur")
+@discord.app_commands.describe(membre="Le membre à bannir", raison="Raison du ban")
+@discord.app_commands.checks.has_permissions(ban_members=True)
+async def ban(interaction: discord.Interaction, membre: discord.Member, raison: str = "Aucune raison fournie"):
+    if membre.top_role >= interaction.user.top_role:
+        return await interaction.response.send_message("❌ Tu ne peux pas bannir ce membre.", ephemeral=True)
+    try:
+        await membre.send(
+            embed=discord.Embed(
+                title="🔨 Tu as été banni",
+                description=f"**Serveur :** {interaction.guild.name}\n**Raison :** {raison}",
+                color=discord.Color.red()
+            )
+        )
+    except Exception:
+        pass
+    await membre.ban(reason=raison)
+    embed = discord.Embed(
+        title="🔨 Membre banni",
+        description=(
+            f"**Membre :** {membre.mention} (`{membre.name}`)\n"
+            f"**Raison :** {raison}\n"
+            f"**Par :** {interaction.user.mention}"
+        ),
+        color=discord.Color.red()
+    )
+    embed.timestamp = discord.utils.utcnow()
+    await interaction.response.send_message(embed=embed)
+
+
+@bot.tree.command(name="unban", description="Débannir un utilisateur par son ID")
+@discord.app_commands.describe(user_id="L'ID de l'utilisateur à débannir")
+@discord.app_commands.checks.has_permissions(ban_members=True)
+async def unban(interaction: discord.Interaction, user_id: str):
+    try:
+        user = await bot.fetch_user(int(user_id))
+        await interaction.guild.unban(user)
+        embed = discord.Embed(
+            title="✅ Membre débanni",
+            description=f"**Utilisateur :** {user.mention} (`{user.name}`)\n**Par :** {interaction.user.mention}",
+            color=discord.Color.green()
+        )
+        embed.timestamp = discord.utils.utcnow()
+        await interaction.response.send_message(embed=embed)
+    except discord.NotFound:
+        await interaction.response.send_message("❌ Utilisateur introuvable ou pas banni.", ephemeral=True)
+    except ValueError:
+        await interaction.response.send_message("❌ ID invalide.", ephemeral=True)
+
+
+@bot.tree.command(name="unbanall", description="Débannir TOUS les membres du serveur")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def unbanall(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    bans = [entry async for entry in interaction.guild.bans()]
+    count = 0
+    for ban_entry in bans:
+        try:
+            await interaction.guild.unban(ban_entry.user)
+            count += 1
+        except Exception:
+            pass
+    await interaction.followup.send(
+        embed=discord.Embed(
+            title="✅ Déban général",
+            description=f"**{count}** membre(s) ont été débanni(s).",
+            color=discord.Color.green()
+        ),
+        ephemeral=True
+    )
+
+
+# ================= /autoping =================
+
+class AutopingChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self):
+        super().__init__(placeholder="Choisis le salon d'autoping", channel_types=[discord.ChannelType.text])
+
+    async def callback(self, interaction: discord.Interaction):
+        global autoping_channel_id
+        autoping_channel_id = self.values[0].id
+        await interaction.response.send_message(
+            f"✅ Autoping activé dans {self.values[0].mention}", ephemeral=True
+        )
+
+class AutopingView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(AutopingChannelSelect())
+
+@bot.tree.command(name="autoping", description="Ping automatiquement les nouveaux membres dans un salon")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def autoping(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="⚙️ Configuration — Autoping",
+        description="Sélectionne le salon où les nouveaux membres seront pingés à leur arrivée.",
+        color=discord.Color.blurple()
+    )
+    await interaction.response.send_message(embed=embed, view=AutopingView(), ephemeral=True)
+
+
+# ================= /invitelog =================
+
+class InviteLogChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self):
+        super().__init__(placeholder="Choisis le salon des logs d'invite", channel_types=[discord.ChannelType.text])
+
+    async def callback(self, interaction: discord.Interaction):
+        global invite_log_channel_id
+        invite_log_channel_id = self.values[0].id
+        try:
+            invites = await interaction.guild.fetch_invites()
+            for inv in invites:
+                guild_invites[inv.code] = inv.uses
+        except Exception:
+            pass
+        await interaction.response.send_message(
+            f"✅ Logs d'invitations définis : {self.values[0].mention}", ephemeral=True
+        )
+
+class InviteLogView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(InviteLogChannelSelect())
+
+@bot.tree.command(name="invitelog", description="Définit le salon pour les logs d'invitation")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def invitelog(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="⚙️ Configuration — Logs d'invitations",
+        description="Sélectionne le salon où seront enregistrés les logs d'invitations.",
+        color=discord.Color.blurple()
+    )
+    await interaction.response.send_message(embed=embed, view=InviteLogView(), ephemeral=True)
+
+
+# ================= /say =================
+
+@bot.tree.command(name="say", description="Faire parler le bot")
+@discord.app_commands.describe(message="Le message à envoyer", salon="Salon cible (optionnel)")
+@discord.app_commands.checks.has_permissions(manage_messages=True)
+async def say(interaction: discord.Interaction, message: str, salon: discord.TextChannel = None):
+    target = salon or interaction.channel
+    await target.send(message)
+    await interaction.response.send_message(f"✅ Message envoyé dans {target.mention}.", ephemeral=True)
+
+
+# ================= /ia =================
+
+@bot.tree.command(name="ia", description="Pose une question à l'IA Claude")
+@discord.app_commands.describe(question="Ta question pour l'IA")
+async def ia(interaction: discord.Interaction, question: str):
+    await interaction.response.defer()
+    try:
+        client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        response = client.messages.create(
+            model="claude-opus-4-6",
+            max_tokens=1024,
+            messages=[{"role": "user", "content": question}]
+        )
+        answer = response.content[0].text
+
+        embed = discord.Embed(title="🤖 Claude IA", color=discord.Color.blurple())
+        embed.add_field(name="❓ Question", value=question[:1024], inline=False)
+        if len(answer) > 1024:
+            answer = answer[:1021] + "..."
+        embed.add_field(name="💬 Réponse", value=answer, inline=False)
+        embed.set_footer(text=f"Demandé par {interaction.user.name} • Slayzix Shop")
+        embed.timestamp = discord.utils.utcnow()
+        await interaction.followup.send(embed=embed)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Erreur IA : `{e}`", ephemeral=True)
+
+
+# ================= /embed =================
+
+@bot.tree.command(name="embed", description="Créer et envoyer un embed personnalisé")
+@discord.app_commands.describe(
+    titre="Titre de l'embed",
+    description="Description de l'embed",
+    couleur="Couleur hex sans # (ex: ff0000)",
+    salon="Salon cible (optionnel)",
+    image="URL d'une image (optionnel)",
+    footer="Texte du footer (optionnel)"
+)
+@discord.app_commands.checks.has_permissions(manage_messages=True)
+async def embed_cmd(
+    interaction: discord.Interaction,
+    titre: str,
+    description: str,
+    couleur: str = "5865f2",
+    salon: discord.TextChannel = None,
+    image: str = None,
+    footer: str = None
+):
+    try:
+        color = discord.Color(int(couleur.strip("#"), 16))
+    except ValueError:
+        color = discord.Color.blurple()
+
+    embed = discord.Embed(title=titre, description=description, color=color)
+    embed.timestamp = discord.utils.utcnow()
+
+    if image:
+        embed.set_image(url=image)
+    if footer:
+        embed.set_footer(text=footer)
+    else:
+        embed.set_footer(text=f"Slayzix Shop • Par {interaction.user.name}")
+
+    target = salon or interaction.channel
+    await target.send(embed=embed)
+    await interaction.response.send_message(f"✅ Embed envoyé dans {target.mention}.", ephemeral=True)
+
 
 # ================= GIVEAWAY =================
 
@@ -377,7 +661,6 @@ class GiveawayView(discord.ui.View):
 
 async def end_giveaway(channel_id: int, message_id: int, guild: discord.Guild):
     await asyncio.sleep(0.1)
-
     if message_id not in active_giveaways:
         return
 
@@ -388,7 +671,7 @@ async def end_giveaway(channel_id: int, message_id: int, guild: discord.Guild):
 
     try:
         message = await channel.fetch_message(message_id)
-    except:
+    except Exception:
         return
 
     participants = list(giveaway["participants"])
@@ -402,7 +685,7 @@ async def end_giveaway(channel_id: int, message_id: int, guild: discord.Guild):
             description=(
                 f"**Prix :** {prize}\n"
                 f"**Organisateur :** <@{host}>\n\n"
-                f"😔 Personne n'a participé... Pas de gagnant !"
+                "😔 Personne n'a participé... Pas de gagnant !"
             ),
             color=discord.Color.red()
         )
@@ -434,19 +717,17 @@ async def end_giveaway(channel_id: int, message_id: int, guild: discord.Guild):
         f"🎊 Félicitations {winners_mentions} ! Tu as gagné **{prize}** !\n"
         f"Contacte <@{host}> pour récupérer ton prix."
     )
-
     del active_giveaways[message_id]
 
 
 @bot.tree.command(name="giveaway", description="Lance un giveaway !")
 @discord.app_commands.describe(
-    duree="Durée du giveaway (ex: 10s, 5m, 1h, 2d)",
+    duree="Durée (ex: 10s, 5m, 1h, 2d)",
     gagnants="Nombre de gagnants",
     prix="Ce que tu fais gagner"
 )
 @discord.app_commands.checks.has_permissions(manage_guild=True)
 async def giveaway(interaction: discord.Interaction, duree: str, gagnants: int, prix: str):
-
     try:
         unit = duree[-1].lower()
         value = int(duree[:-1])
@@ -454,7 +735,7 @@ async def giveaway(interaction: discord.Interaction, duree: str, gagnants: int, 
         if unit not in multipliers:
             raise ValueError
         seconds = value * multipliers[unit]
-    except:
+    except Exception:
         return await interaction.response.send_message(
             "❌ Format invalide. Exemples : `30s`, `5m`, `1h`, `2d`", ephemeral=True
         )
@@ -472,7 +753,7 @@ async def giveaway(interaction: discord.Interaction, duree: str, gagnants: int, 
             f"**Gagnant(s) :** {gagnants}\n"
             f"**Organisateur :** {interaction.user.mention}\n"
             f"**Fin :** <t:{end_timestamp}:R> (<t:{end_timestamp}:f>)\n\n"
-            f"Clique sur 🎉 pour participer !"
+            "Clique sur 🎉 pour participer !"
         ),
         color=discord.Color.blurple()
     )
@@ -498,30 +779,27 @@ async def giveaway(interaction: discord.Interaction, duree: str, gagnants: int, 
     await end_giveaway(interaction.channel.id, msg.id, interaction.guild)
 
 
-@bot.tree.command(name="reroll", description="Retirer un nouveau gagnant pour un giveaway terminé")
+@bot.tree.command(name="reroll", description="Nouveau tirage pour un giveaway terminé")
 @discord.app_commands.describe(message_id="L'ID du message du giveaway terminé")
 @discord.app_commands.checks.has_permissions(manage_guild=True)
 async def reroll(interaction: discord.Interaction, message_id: str):
     try:
-        msg = await interaction.channel.fetch_message(int(message_id))
-    except:
+        await interaction.channel.fetch_message(int(message_id))
+    except Exception:
         return await interaction.response.send_message("❌ Message introuvable.", ephemeral=True)
-
     await interaction.response.send_message(
-        "🎲 Nouveau tirage... mais les participants ne sont plus disponibles après la fin.\n"
-        "Utilise `/giveaway` pour relancer un nouveau giveaway !",
+        "🎲 Les participants ne sont plus dispo après la fin. Utilise `/giveaway` pour relancer !",
         ephemeral=True
     )
 
 
-@bot.tree.command(name="giveawayend", description="Terminer un giveaway en cours manuellement")
+@bot.tree.command(name="giveawayend", description="Terminer un giveaway manuellement")
 @discord.app_commands.describe(message_id="L'ID du message du giveaway")
 @discord.app_commands.checks.has_permissions(manage_guild=True)
 async def giveawayend(interaction: discord.Interaction, message_id: str):
     msg_id = int(message_id)
     if msg_id not in active_giveaways:
         return await interaction.response.send_message("❌ Giveaway introuvable ou déjà terminé.", ephemeral=True)
-
     await interaction.response.send_message("✅ Giveaway terminé manuellement !", ephemeral=True)
     await end_giveaway(interaction.channel.id, msg_id, interaction.guild)
 
@@ -568,6 +846,7 @@ async def setvouchrole(ctx):
     embed = discord.Embed(title="⚙️ Configuration — Rôle Vouch", color=discord.Color.blurple())
     await ctx.send(embed=embed, view=VouchRoleSetupView())
 
+
 @bot.tree.command(name="vouch", description="Laisse un avis sur le shop !")
 @discord.app_commands.describe(note="Ta note sur 5", service="Le service acheté", commentaire="Ton commentaire")
 @discord.app_commands.choices(note=[
@@ -579,8 +858,14 @@ async def setvouchrole(ctx):
 ])
 async def vouch(interaction: discord.Interaction, note: int, service: str, commentaire: str):
     stars = "⭐" * note + "🌑" * (5 - note)
-    colors = {1: discord.Color.red(), 2: discord.Color.orange(), 3: discord.Color.yellow(), 4: discord.Color.green(), 5: discord.Color.gold()}
-    badges = {1: "😡 Très mauvais", 2: "😕 Mauvais", 3: "😐 Correct", 4: "😊 Bien", 5: "🤩 Excellent !"}
+    colors = {
+        1: discord.Color.red(), 2: discord.Color.orange(),
+        3: discord.Color.yellow(), 4: discord.Color.green(), 5: discord.Color.gold()
+    }
+    badges = {
+        1: "😡 Très mauvais", 2: "😕 Mauvais",
+        3: "😐 Correct", 4: "😊 Bien", 5: "🤩 Excellent !"
+    }
 
     embed = discord.Embed(title="📝 Nouvel Avis — Slayzix Shop", color=colors[note])
     embed.add_field(name="👤 Client", value=interaction.user.mention, inline=True)
@@ -615,6 +900,7 @@ async def vouch(interaction: discord.Interaction, note: int, service: str, comme
     if role_added:
         await interaction.followup.send(f"🎖️ Le rôle **{role.name}** t'a été attribué !", ephemeral=True)
 
+
 # ================= ON MESSAGE =================
 
 @bot.event
@@ -630,12 +916,14 @@ async def on_message(message):
                 pass
     await bot.process_commands(message)
 
+
 # ================= ON READY =================
 
 @bot.event
 async def on_ready():
     await bot.tree.sync()
     print(f"✅ {bot.user} connecté et slash commands synchronisées !")
+
 
 # ================= START =================
 
