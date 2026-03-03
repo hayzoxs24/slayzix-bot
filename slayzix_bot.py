@@ -4,6 +4,8 @@ import os
 import asyncio
 import random
 from datetime import datetime, timedelta
+import aiohttp
+import re
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
@@ -363,12 +365,10 @@ async def hide(interaction: discord.Interaction, salon: discord.TextChannel = No
     overwrite = target.overwrites_for(everyone)
 
     if overwrite.view_channel is False:
-        # Déjà caché → on le montre
         overwrite.view_channel = None
         await target.set_permissions(everyone, overwrite=overwrite)
         await interaction.response.send_message(f"👁️ {target.mention} est maintenant **visible** par @everyone.", ephemeral=True)
     else:
-        # On le cache
         overwrite.view_channel = False
         await target.set_permissions(everyone, overwrite=overwrite)
         await interaction.response.send_message(f"🔒 {target.mention} est maintenant **caché** à @everyone.", ephemeral=True)
@@ -500,8 +500,6 @@ def build_embed(session: dict, username: str) -> discord.Embed:
         else:
             embed.set_author(name=auteur_nom)
 
-
-
     thumb = session.get("thumbnail", "")
     if thumb.startswith("http"):
         embed.set_thumbnail(url=thumb)
@@ -519,7 +517,6 @@ def build_embed(session: dict, username: str) -> discord.Embed:
     return embed
 
 
-# ── Couleur ──
 class EmbedColorSelect(discord.ui.Select):
     def __init__(self):
         options = [discord.SelectOption(label=nom, value=val) for nom, val in COULEURS_PRESET.items()]
@@ -537,7 +534,6 @@ class EmbedColorSelect(discord.ui.Select):
             await interaction.response.send_message("✅ Couleur enregistrée !", ephemeral=True)
 
 
-# ── Salon ──
 class EmbedChannelSelect(discord.ui.ChannelSelect):
     def __init__(self, uid):
         super().__init__(placeholder="📢 Salon d'envoi...", channel_types=[discord.ChannelType.text], row=1)
@@ -548,7 +544,6 @@ class EmbedChannelSelect(discord.ui.ChannelSelect):
         await interaction.response.send_message(f"✅ Salon cible : {self.values[0].mention}", ephemeral=True)
 
 
-# ── Modals ──
 class EmbedCustomColorModal(discord.ui.Modal, title="🎨 Couleur personnalisée"):
     couleur = discord.ui.TextInput(label="Code hex (sans #)", placeholder="ex: ff0000", min_length=6, max_length=6)
 
@@ -628,7 +623,6 @@ class EmbedFieldModal(discord.ui.Modal, title="➕ Ajouter un champ (field)"):
         await interaction.response.send_message(f"✅ Champ **{self.field_name.value}** ajouté ! ({len(s['fields'])}/25)", ephemeral=True)
 
 
-# ── Vue principale ──
 class EmbedBuilderView(discord.ui.View):
     def __init__(self, uid):
         super().__init__(timeout=300)
@@ -920,6 +914,159 @@ async def on_message(message):
             except discord.Forbidden:
                 pass
     await bot.process_commands(message)
+
+
+# ================= /osint =================
+
+# Liste des plateformes à vérifier (pseudo)
+OSINT_PLATFORMS = [
+    {"name": "TikTok",      "url": "https://www.tiktok.com/@{}", "emoji": "🎵"},
+    {"name": "Instagram",   "url": "https://www.instagram.com/{}/", "emoji": "📸"},
+    {"name": "Twitter/X",   "url": "https://twitter.com/{}", "emoji": "🐦"},
+    {"name": "YouTube",     "url": "https://www.youtube.com/@{}", "emoji": "▶️"},
+    {"name": "GitHub",      "url": "https://github.com/{}", "emoji": "💻"},
+    {"name": "Reddit",      "url": "https://www.reddit.com/user/{}", "emoji": "🟠"},
+    {"name": "Twitch",      "url": "https://www.twitch.tv/{}", "emoji": "🟣"},
+    {"name": "Pinterest",   "url": "https://www.pinterest.com/{}/", "emoji": "📌"},
+    {"name": "Snapchat",    "url": "https://www.snapchat.com/add/{}", "emoji": "👻"},
+    {"name": "Steam",       "url": "https://steamcommunity.com/id/{}", "emoji": "🎮"},
+    {"name": "Spotify",     "url": "https://open.spotify.com/user/{}", "emoji": "🎧"},
+    {"name": "Roblox",      "url": "https://www.roblox.com/user.aspx?username={}", "emoji": "🧱"},
+]
+
+async def check_platform(session: aiohttp.ClientSession, platform: dict, username: str) -> dict:
+    """Vérifie si un pseudo existe sur une plateforme via une requête HTTP."""
+    url = platform["url"].format(username)
+    try:
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=5), allow_redirects=True) as resp:
+            # On considère le profil comme trouvé si le status est 200
+            found = resp.status == 200
+            return {"name": platform["name"], "emoji": platform["emoji"], "url": url, "found": found}
+    except Exception:
+        return {"name": platform["name"], "emoji": platform["emoji"], "url": url, "found": False}
+
+
+@bot.tree.command(name="osint", description="🔍 Recherche OSINT sur un pseudo (réseaux sociaux, email, téléphone, adresse)")
+@discord.app_commands.describe(
+    pseudo="Pseudo à rechercher sur les réseaux sociaux",
+    email="Adresse email à rechercher (optionnel)",
+    telephone="Numéro de téléphone à rechercher (optionnel)",
+    adresse="Adresse / ville à rechercher (optionnel)"
+)
+async def osint(
+    interaction: discord.Interaction,
+    pseudo: str,
+    email: str = None,
+    telephone: str = None,
+    adresse: str = None
+):
+    # Defer car la recherche peut prendre du temps
+    await interaction.response.defer(ephemeral=True)
+
+    # ── Vérification des plateformes ──
+    found_platforms = []
+    not_found_platforms = []
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+
+    async with aiohttp.ClientSession(headers=headers) as session:
+        tasks = [check_platform(session, p, pseudo) for p in OSINT_PLATFORMS]
+        results = await asyncio.gather(*tasks)
+
+    for r in results:
+        if r["found"]:
+            found_platforms.append(r)
+        else:
+            not_found_platforms.append(r)
+
+    # ── Construction de l'embed principal ──
+    embed = discord.Embed(
+        title=f"🕵️ Rapport OSINT — `{pseudo}`",
+        color=discord.Color.dark_red()
+    )
+    embed.set_footer(text=f"Slayzix Shop • OSINT • Demandé par {interaction.user.name}")
+    embed.timestamp = discord.utils.utcnow()
+
+    # Résultats réseaux sociaux
+    if found_platforms:
+        found_text = "\n".join(
+            [f"{p['emoji']} **[{p['name']}]({p['url']})**  ✅" for p in found_platforms]
+        )
+        embed.add_field(
+            name=f"✅ Profils trouvés ({len(found_platforms)}/{len(OSINT_PLATFORMS)})",
+            value=found_text,
+            inline=False
+        )
+    else:
+        embed.add_field(
+            name="✅ Profils trouvés",
+            value="❌ Aucun profil trouvé pour ce pseudo.",
+            inline=False
+        )
+
+    if not_found_platforms:
+        not_found_text = "  ".join([f"{p['emoji']} ~~{p['name']}~~" for p in not_found_platforms])
+        embed.add_field(
+            name=f"❌ Non trouvé ({len(not_found_platforms)}/{len(OSINT_PLATFORMS)})",
+            value=not_found_text,
+            inline=False
+        )
+
+    embed.add_field(name="​", value="──────────────────────", inline=False)
+
+    # ── Email ──
+    if email:
+        # Validation basique du format
+        email_valid = bool(re.match(r"^[\w\.\+\-]+@[\w\-]+\.[a-zA-Z]{2,}$", email))
+        email_domain = email.split("@")[-1] if "@" in email else "?"
+        email_info = (
+            f"📧 **Adresse :** `{email}`\n"
+            f"🌐 **Domaine :** `{email_domain}`\n"
+            f"✅ **Format valide :** {'Oui' if email_valid else 'Non'}\n"
+            f"🔗 **Recherche :** [Google](https://www.google.com/search?q=%22{email}%22) | "
+            f"[HaveIBeenPwned](https://haveibeenpwned.com/account/{email})"
+        )
+        embed.add_field(name="📧 Email", value=email_info, inline=False)
+
+    # ── Téléphone ──
+    if telephone:
+        # Nettoyage du numéro
+        phone_clean = re.sub(r"[\s\-\.\(\)]", "", telephone)
+        phone_info = (
+            f"📞 **Numéro :** `{telephone}`\n"
+            f"🔗 **Recherche :** [Google](https://www.google.com/search?q=%22{phone_clean}%22) | "
+            f"[NumLookup](https://www.numlookup.com/?number={phone_clean})"
+        )
+        embed.add_field(name="📞 Téléphone", value=phone_info, inline=False)
+
+    # ── Adresse ──
+    if adresse:
+        adresse_encoded = adresse.replace(" ", "+")
+        adresse_info = (
+            f"🏠 **Adresse :** `{adresse}`\n"
+            f"🔗 **Recherche :** [Google Maps](https://www.google.com/maps/search/{adresse_encoded}) | "
+            f"[Google](https://www.google.com/search?q=%22{adresse_encoded}%22)"
+        )
+        embed.add_field(name="🏠 Adresse", value=adresse_info, inline=False)
+
+    # ── Liens de recherche globaux ──
+    pseudo_encoded = pseudo.replace(" ", "+")
+    global_links = (
+        f"[Google](https://www.google.com/search?q=%22{pseudo_encoded}%22) | "
+        f"[Sherlock](https://sherlock-project.github.io/) | "
+        f"[WhatsMyName](https://whatsmyname.app/?q={pseudo})"
+    )
+    embed.add_field(name="🌐 Recherches globales", value=global_links, inline=False)
+
+    embed.add_field(
+        name="⚠️ Avertissement",
+        value="*Ces données proviennent de sources **publiques** uniquement. Utilisation éthique et légale uniquement.*",
+        inline=False
+    )
+
+    await interaction.followup.send(embed=embed, ephemeral=True)
 
 
 # ================= ON READY =================
