@@ -918,30 +918,184 @@ async def on_message(message):
 
 # ================= /osint =================
 
-# Liste des plateformes à vérifier (pseudo)
+# Liste des plateformes avec vérification précise du contenu
+# "not_found_indicators" = textes présents dans la page quand le profil N'EXISTE PAS
+# "found_indicators"     = textes présents UNIQUEMENT quand le profil EXISTE
 OSINT_PLATFORMS = [
-    {"name": "TikTok",      "url": "https://www.tiktok.com/@{}", "emoji": "🎵"},
-    {"name": "Instagram",   "url": "https://www.instagram.com/{}/", "emoji": "📸"},
-    {"name": "Twitter/X",   "url": "https://twitter.com/{}", "emoji": "🐦"},
-    {"name": "YouTube",     "url": "https://www.youtube.com/@{}", "emoji": "▶️"},
-    {"name": "GitHub",      "url": "https://github.com/{}", "emoji": "💻"},
-    {"name": "Reddit",      "url": "https://www.reddit.com/user/{}", "emoji": "🟠"},
-    {"name": "Twitch",      "url": "https://www.twitch.tv/{}", "emoji": "🟣"},
-    {"name": "Pinterest",   "url": "https://www.pinterest.com/{}/", "emoji": "📌"},
-    {"name": "Snapchat",    "url": "https://www.snapchat.com/add/{}", "emoji": "👻"},
-    {"name": "Steam",       "url": "https://steamcommunity.com/id/{}", "emoji": "🎮"},
-    {"name": "Spotify",     "url": "https://open.spotify.com/user/{}", "emoji": "🎧"},
-    {"name": "Roblox",      "url": "https://www.roblox.com/user.aspx?username={}", "emoji": "🧱"},
+    {
+        "name": "GitHub",
+        "url": "https://github.com/{}",
+        "emoji": "💻",
+        "not_found_indicators": ["Not Found", "This is not the web page you are looking for"],
+        "found_indicators": [],
+    },
+    {
+        "name": "Reddit",
+        "url": "https://www.reddit.com/user/{}/",
+        "emoji": "🟠",
+        "not_found_indicators": ["Sorry, nobody on Reddit goes by that name", "page not found"],
+        "found_indicators": [],
+    },
+    {
+        "name": "Twitter/X",
+        "url": "https://twitter.com/{}",
+        "emoji": "🐦",
+        "not_found_indicators": ["This account doesn\\'t exist", "page does not exist", "account suspended"],
+        "found_indicators": [],
+    },
+    {
+        "name": "TikTok",
+        "url": "https://www.tiktok.com/@{}",
+        "emoji": "🎵",
+        "not_found_indicators": ["Couldn\\'t find this account", "couldn't find this account"],
+        "found_indicators": ["followers", "following", "likes"],
+    },
+    {
+        "name": "Instagram",
+        "url": "https://www.instagram.com/{}/",
+        "emoji": "📸",
+        "not_found_indicators": ["Sorry, this page isn\\'t available", "Page Not Found"],
+        "found_indicators": [],
+    },
+    {
+        "name": "YouTube",
+        "url": "https://www.youtube.com/@{}",
+        "emoji": "▶️",
+        "not_found_indicators": ["404", "This page isn\\'t available"],
+        "found_indicators": ["subscribers", "abonnés", "videos"],
+    },
+    {
+        "name": "Twitch",
+        "url": "https://www.twitch.tv/{}",
+        "emoji": "🟣",
+        "not_found_indicators": ["Sorry. Unless you\\'ve got a time machine", "404"],
+        "found_indicators": [],
+    },
+    {
+        "name": "Pinterest",
+        "url": "https://www.pinterest.com/{}/",
+        "emoji": "📌",
+        "not_found_indicators": ["The page you were looking for doesn\\'t exist", "Hmm, we couldn\\'t find that page"],
+        "found_indicators": [],
+    },
+    {
+        "name": "Snapchat",
+        "url": "https://www.snapchat.com/add/{}",
+        "emoji": "👻",
+        "not_found_indicators": ["Sorry, we couldn\\'t find", "404"],
+        "found_indicators": ["Add me on Snapchat", "snapchat.com/add"],
+    },
+    {
+        "name": "Steam",
+        "url": "https://steamcommunity.com/id/{}",
+        "emoji": "🎮",
+        "not_found_indicators": ["The specified profile could not be found", "error"],
+        "found_indicators": ["profile_header", "persona_name"],
+    },
+    {
+        "name": "Spotify",
+        "url": "https://open.spotify.com/user/{}",
+        "emoji": "🎧",
+        "not_found_indicators": ["Page not found", "Spotify - Web Player"],
+        "found_indicators": [],
+    },
+    {
+        "name": "Roblox",
+        "url": "https://www.roblox.com/user.aspx?username={}",
+        "emoji": "🧱",
+        "not_found_indicators": ["Page cannot be found", "404"],
+        "found_indicators": [],
+    },
+    {
+        "name": "Minecraft",
+        "url": "https://api.mojang.com/users/profiles/minecraft/{}",
+        "emoji": "⛏️",
+        "not_found_indicators": ["errorMessage", "null"],
+        "found_indicators": ["\"id\"", "\"name\""],
+    },
+    {
+        "name": "DeviantArt",
+        "url": "https://www.deviantart.com/{}",
+        "emoji": "🎨",
+        "not_found_indicators": ["Page Not Found", "This page is not available"],
+        "found_indicators": [],
+    },
+    {
+        "name": "Flickr",
+        "url": "https://www.flickr.com/people/{}",
+        "emoji": "📷",
+        "not_found_indicators": ["Page Not Found", "Oops"],
+        "found_indicators": [],
+    },
+    {
+        "name": "Patreon",
+        "url": "https://www.patreon.com/{}",
+        "emoji": "💰",
+        "not_found_indicators": ["Page Not Found", "404"],
+        "found_indicators": [],
+    },
+    {
+        "name": "Linktree",
+        "url": "https://linktr.ee/{}",
+        "emoji": "🌳",
+        "not_found_indicators": ["Sorry, this page isn\\'t available", "404"],
+        "found_indicators": [],
+    },
+    {
+        "name": "Soundcloud",
+        "url": "https://soundcloud.com/{}",
+        "emoji": "🎶",
+        "not_found_indicators": ["We can\\'t find that user", "404"],
+        "found_indicators": [],
+    },
+    {
+        "name": "Behance",
+        "url": "https://www.behance.net/{}",
+        "emoji": "🖼️",
+        "not_found_indicators": ["The page you requested was not found", "404"],
+        "found_indicators": [],
+    },
+    {
+        "name": "Medium",
+        "url": "https://medium.com/@{}",
+        "emoji": "✍️",
+        "not_found_indicators": ["Page not found", "404"],
+        "found_indicators": [],
+    },
 ]
 
 async def check_platform(session: aiohttp.ClientSession, platform: dict, username: str) -> dict:
-    """Vérifie si un pseudo existe sur une plateforme via une requête HTTP."""
+    """Vérifie précisément si un profil existe via le contenu de la page."""
     url = platform["url"].format(username)
     try:
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=5), allow_redirects=True) as resp:
-            # On considère le profil comme trouvé si le status est 200
-            found = resp.status == 200
-            return {"name": platform["name"], "emoji": platform["emoji"], "url": url, "found": found}
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=8), allow_redirects=True) as resp:
+            # Si 404 direct → pas trouvé
+            if resp.status == 404:
+                return {"name": platform["name"], "emoji": platform["emoji"], "url": url, "found": False}
+
+            if resp.status != 200:
+                return {"name": platform["name"], "emoji": platform["emoji"], "url": url, "found": False}
+
+            # Lire le contenu (limité à 50ko pour la perf)
+            content = await resp.text(errors="ignore")
+            content_lower = content.lower()
+
+            # Si indicateurs "non trouvé" présents → pas trouvé
+            for indicator in platform.get("not_found_indicators", []):
+                if indicator.lower() in content_lower:
+                    return {"name": platform["name"], "emoji": platform["emoji"], "url": url, "found": False}
+
+            # Si des indicateurs "trouvé" sont définis, au moins un doit être présent
+            found_indicators = platform.get("found_indicators", [])
+            if found_indicators:
+                for indicator in found_indicators:
+                    if indicator.lower() in content_lower:
+                        return {"name": platform["name"], "emoji": platform["emoji"], "url": url, "found": True}
+                return {"name": platform["name"], "emoji": platform["emoji"], "url": url, "found": False}
+
+            # Sinon, status 200 sans indicateur négatif = trouvé
+            return {"name": platform["name"], "emoji": platform["emoji"], "url": url, "found": True}
+
     except Exception:
         return {"name": platform["name"], "emoji": platform["emoji"], "url": url, "found": False}
 
