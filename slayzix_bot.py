@@ -6,6 +6,7 @@ import random
 from datetime import datetime, timedelta
 import aiohttp
 import re
+import yt_dlp
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
@@ -29,6 +30,200 @@ ticket_config = {
 open_tickets = {}
 active_giveaways = {}
 embed_sessions = {}
+
+# ================= MUSIC CONFIG =================
+
+YDL_OPTIONS = {
+    "format": "bestaudio/best",
+    "noplaylist": True,
+    "quiet": True,
+    "default_search": "ytsearch",
+    "source_address": "0.0.0.0",
+}
+
+FFMPEG_OPTIONS = {
+    "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
+    "options": "-vn",
+}
+
+music_queues: dict = {}
+
+
+def get_music_queue(guild_id: int) -> list:
+    if guild_id not in music_queues:
+        music_queues[guild_id] = []
+    return music_queues[guild_id]
+
+
+def play_next(ctx_or_interaction, guild, voice_client):
+    queue = get_music_queue(guild.id)
+    if queue:
+        song = queue.pop(0)
+        source = discord.FFmpegPCMAudio(song["url"], **FFMPEG_OPTIONS)
+        voice_client.play(
+            source,
+            after=lambda e: play_next(ctx_or_interaction, guild, voice_client) if not e else print(f"Erreur lecture : {e}"),
+        )
+        asyncio.run_coroutine_threadsafe(
+            ctx_or_interaction.channel.send(f"🎵 En lecture : **{song['title']}**"), bot.loop
+        )
+    else:
+        asyncio.run_coroutine_threadsafe(
+            ctx_or_interaction.channel.send("✅ File d'attente vide. Déconnexion dans 60 s…"), bot.loop
+        )
+        asyncio.run_coroutine_threadsafe(
+            _disconnect_after(voice_client, 60), bot.loop
+        )
+
+
+async def _disconnect_after(voice_client, delay: int):
+    await asyncio.sleep(delay)
+    if voice_client and voice_client.is_connected() and not voice_client.is_playing():
+        await voice_client.disconnect()
+
+
+# ================= MUSIC COMMANDS =================
+
+@bot.tree.command(name="play", description="🎵 Joue une chanson ou l'ajoute à la file d'attente")
+@discord.app_commands.describe(recherche="Titre, artiste ou URL YouTube")
+async def play(interaction: discord.Interaction, recherche: str):
+    if not interaction.user.voice:
+        return await interaction.response.send_message("❌ Tu dois être dans un salon vocal !", ephemeral=True)
+
+    channel = interaction.user.voice.channel
+    vc = interaction.guild.voice_client
+
+    if vc is None:
+        vc = await channel.connect()
+    elif vc.channel != channel:
+        await vc.move_to(channel)
+
+    await interaction.response.defer()
+
+    with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
+        try:
+            info = ydl.extract_info(recherche, download=False)
+            if "entries" in info:
+                info = info["entries"][0]
+            song = {"title": info["title"], "url": info["url"]}
+        except Exception as e:
+            return await interaction.followup.send(f"❌ Impossible de trouver la chanson : `{e}`")
+
+    queue = get_music_queue(interaction.guild.id)
+
+    if vc.is_playing() or vc.is_paused():
+        queue.append(song)
+        embed = discord.Embed(
+            title="➕ Ajouté à la file",
+            description=f"**{song['title']}**\nPosition dans la file : `{len(queue)}`",
+            color=discord.Color.blurple()
+        )
+        embed.set_footer(text="Slayzix Shop • Music")
+        await interaction.followup.send(embed=embed)
+    else:
+        queue.insert(0, song)
+        play_next(interaction, interaction.guild, vc)
+        embed = discord.Embed(
+            title="🎵 En lecture",
+            description=f"**{song['title']}**",
+            color=discord.Color.green()
+        )
+        embed.set_footer(text="Slayzix Shop • Music")
+        await interaction.followup.send(embed=embed)
+
+
+@bot.tree.command(name="skip", description="⏭️ Passe à la chanson suivante")
+async def skip(interaction: discord.Interaction):
+    vc = interaction.guild.voice_client
+    if vc and vc.is_playing():
+        vc.stop()
+        await interaction.response.send_message(embed=discord.Embed(
+            title="⏭️ Chanson passée !",
+            color=discord.Color.blurple()
+        ))
+    else:
+        await interaction.response.send_message("❌ Aucune musique en cours.", ephemeral=True)
+
+
+@bot.tree.command(name="pause", description="⏸️ Met en pause la lecture")
+async def pause(interaction: discord.Interaction):
+    vc = interaction.guild.voice_client
+    if vc and vc.is_playing():
+        vc.pause()
+        await interaction.response.send_message(embed=discord.Embed(
+            title="⏸️ Lecture en pause",
+            color=discord.Color.orange()
+        ))
+    else:
+        await interaction.response.send_message("❌ Aucune musique en cours.", ephemeral=True)
+
+
+@bot.tree.command(name="resume", description="▶️ Reprend la lecture")
+async def resume(interaction: discord.Interaction):
+    vc = interaction.guild.voice_client
+    if vc and vc.is_paused():
+        vc.resume()
+        await interaction.response.send_message(embed=discord.Embed(
+            title="▶️ Lecture reprise !",
+            color=discord.Color.green()
+        ))
+    else:
+        await interaction.response.send_message("❌ La lecture n'est pas en pause.", ephemeral=True)
+
+
+@bot.tree.command(name="stop", description="⏹️ Arrête la musique et déconnecte le bot")
+async def stop(interaction: discord.Interaction):
+    get_music_queue(interaction.guild.id).clear()
+    vc = interaction.guild.voice_client
+    if vc:
+        vc.stop()
+        await vc.disconnect()
+    await interaction.response.send_message(embed=discord.Embed(
+        title="⏹️ Musique arrêtée",
+        description="File d'attente vidée et bot déconnecté.",
+        color=discord.Color.red()
+    ))
+
+
+@bot.tree.command(name="queue", description="📋 Affiche la file d'attente musicale")
+async def queue_music(interaction: discord.Interaction):
+    queue = get_music_queue(interaction.guild.id)
+    if not queue:
+        return await interaction.response.send_message(embed=discord.Embed(
+            title="📭 File d'attente vide",
+            color=discord.Color.greyple()
+        ))
+    lines = [f"`{i+1}.` {song['title']}" for i, song in enumerate(queue)]
+    embed = discord.Embed(
+        title="🎶 File d'attente",
+        description="\n".join(lines),
+        color=discord.Color.blurple()
+    )
+    embed.set_footer(text=f"Slayzix Shop • {len(queue)} chanson(s) en attente")
+    await interaction.response.send_message(embed=embed)
+
+
+@bot.tree.command(name="clearqueue", description="🗑️ Vide la file d'attente musicale")
+async def clearqueue(interaction: discord.Interaction):
+    get_music_queue(interaction.guild.id).clear()
+    await interaction.response.send_message(embed=discord.Embed(
+        title="🗑️ File d'attente vidée !",
+        color=discord.Color.orange()
+    ))
+
+
+@bot.tree.command(name="np", description="🎵 Affiche la chanson en cours de lecture")
+async def nowplaying(interaction: discord.Interaction):
+    vc = interaction.guild.voice_client
+    if vc and vc.is_playing():
+        await interaction.response.send_message(embed=discord.Embed(
+            title="🎵 En cours de lecture",
+            description="Utilise `/queue` pour voir les prochaines chansons.",
+            color=discord.Color.green()
+        ))
+    else:
+        await interaction.response.send_message("❌ Aucune musique en cours.", ephemeral=True)
+
 
 # ================= WELCOME / GOODBYE =================
 
@@ -93,7 +288,7 @@ async def on_member_remove(member):
     await ch.send(embed=embed)
 
 
-# ================= !welcome / !goodbye =================
+# ================= /welcome / /goodbye =================
 
 class WelcomeChannelSelect(discord.ui.ChannelSelect):
     def __init__(self):
@@ -108,10 +303,13 @@ class WelcomeSetupView(discord.ui.View):
         super().__init__(timeout=None)
         self.add_item(WelcomeChannelSelect())
 
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def welcome(ctx):
-    await ctx.send(embed=discord.Embed(title="⚙️ Salon de bienvenue", color=discord.Color.green()), view=WelcomeSetupView())
+@bot.tree.command(name="welcome", description="⚙️ Configurer le salon de bienvenue")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def welcome(interaction: discord.Interaction):
+    await interaction.response.send_message(
+        embed=discord.Embed(title="⚙️ Salon de bienvenue", color=discord.Color.green()),
+        view=WelcomeSetupView(), ephemeral=True
+    )
 
 
 class GoodbyeChannelSelect(discord.ui.ChannelSelect):
@@ -127,10 +325,13 @@ class GoodbyeSetupView(discord.ui.View):
         super().__init__(timeout=None)
         self.add_item(GoodbyeChannelSelect())
 
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def goodbye(ctx):
-    await ctx.send(embed=discord.Embed(title="⚙️ Salon d'au revoir", color=discord.Color.red()), view=GoodbyeSetupView())
+@bot.tree.command(name="goodbye", description="⚙️ Configurer le salon d'au revoir")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def goodbye(interaction: discord.Interaction):
+    await interaction.response.send_message(
+        embed=discord.Embed(title="⚙️ Salon d'au revoir", color=discord.Color.red()),
+        view=GoodbyeSetupView(), ephemeral=True
+    )
 
 
 # ================= TICKETS =================
@@ -827,10 +1028,13 @@ class VouchSetupView(discord.ui.View):
         super().__init__(timeout=None)
         self.add_item(VouchChannelSelect())
 
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def setvouchchannel(ctx):
-    await ctx.send(embed=discord.Embed(title="⚙️ Salon des avis", color=discord.Color.blurple()), view=VouchSetupView())
+@bot.tree.command(name="setvouchchannel", description="⚙️ Configurer le salon des avis")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def setvouchchannel(interaction: discord.Interaction):
+    await interaction.response.send_message(
+        embed=discord.Embed(title="⚙️ Salon des avis", color=discord.Color.blurple()),
+        view=VouchSetupView(), ephemeral=True
+    )
 
 
 class VouchRoleSelect(discord.ui.RoleSelect):
@@ -846,10 +1050,13 @@ class VouchRoleSetupView(discord.ui.View):
         super().__init__(timeout=None)
         self.add_item(VouchRoleSelect())
 
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def setvouchrole(ctx):
-    await ctx.send(embed=discord.Embed(title="⚙️ Rôle Vouch", color=discord.Color.blurple()), view=VouchRoleSetupView())
+@bot.tree.command(name="setvouchrole", description="⚙️ Configurer le rôle attribué après un vouch")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def setvouchrole(interaction: discord.Interaction):
+    await interaction.response.send_message(
+        embed=discord.Embed(title="⚙️ Rôle Vouch", color=discord.Color.blurple()),
+        view=VouchRoleSetupView(), ephemeral=True
+    )
 
 
 @bot.tree.command(name="vouch", description="Laisse un avis sur le shop !")
@@ -918,307 +1125,98 @@ async def on_message(message):
 
 # ================= /osint =================
 
-# Liste des plateformes avec vérification précise du contenu
-# "not_found_indicators" = textes présents dans la page quand le profil N'EXISTE PAS
-# "found_indicators"     = textes présents UNIQUEMENT quand le profil EXISTE
 OSINT_PLATFORMS = [
-    {
-        "name": "GitHub",
-        "url": "https://github.com/{}",
-        "emoji": "💻",
-        "not_found_indicators": ["Not Found", "This is not the web page you are looking for"],
-        "found_indicators": [],
-    },
-    {
-        "name": "Reddit",
-        "url": "https://www.reddit.com/user/{}/",
-        "emoji": "🟠",
-        "not_found_indicators": ["Sorry, nobody on Reddit goes by that name", "page not found"],
-        "found_indicators": [],
-    },
-    {
-        "name": "Twitter/X",
-        "url": "https://twitter.com/{}",
-        "emoji": "🐦",
-        "not_found_indicators": ["This account doesn\\'t exist", "page does not exist", "account suspended"],
-        "found_indicators": [],
-    },
-    {
-        "name": "TikTok",
-        "url": "https://www.tiktok.com/@{}",
-        "emoji": "🎵",
-        "not_found_indicators": ["Couldn\\'t find this account", "couldn't find this account"],
-        "found_indicators": ["followers", "following", "likes"],
-    },
-    {
-        "name": "Instagram",
-        "url": "https://www.instagram.com/{}/",
-        "emoji": "📸",
-        "not_found_indicators": ["Sorry, this page isn\\'t available", "Page Not Found"],
-        "found_indicators": [],
-    },
-    {
-        "name": "YouTube",
-        "url": "https://www.youtube.com/@{}",
-        "emoji": "▶️",
-        "not_found_indicators": ["404", "This page isn\\'t available"],
-        "found_indicators": ["subscribers", "abonnés", "videos"],
-    },
-    {
-        "name": "Twitch",
-        "url": "https://www.twitch.tv/{}",
-        "emoji": "🟣",
-        "not_found_indicators": ["Sorry. Unless you\\'ve got a time machine", "404"],
-        "found_indicators": [],
-    },
-    {
-        "name": "Pinterest",
-        "url": "https://www.pinterest.com/{}/",
-        "emoji": "📌",
-        "not_found_indicators": ["The page you were looking for doesn\\'t exist", "Hmm, we couldn\\'t find that page"],
-        "found_indicators": [],
-    },
-    {
-        "name": "Snapchat",
-        "url": "https://www.snapchat.com/add/{}",
-        "emoji": "👻",
-        "not_found_indicators": ["Sorry, we couldn\\'t find", "404"],
-        "found_indicators": ["Add me on Snapchat", "snapchat.com/add"],
-    },
-    {
-        "name": "Steam",
-        "url": "https://steamcommunity.com/id/{}",
-        "emoji": "🎮",
-        "not_found_indicators": ["The specified profile could not be found", "error"],
-        "found_indicators": ["profile_header", "persona_name"],
-    },
-    {
-        "name": "Spotify",
-        "url": "https://open.spotify.com/user/{}",
-        "emoji": "🎧",
-        "not_found_indicators": ["Page not found", "Spotify - Web Player"],
-        "found_indicators": [],
-    },
-    {
-        "name": "Roblox",
-        "url": "https://www.roblox.com/user.aspx?username={}",
-        "emoji": "🧱",
-        "not_found_indicators": ["Page cannot be found", "404"],
-        "found_indicators": [],
-    },
-    {
-        "name": "Minecraft",
-        "url": "https://api.mojang.com/users/profiles/minecraft/{}",
-        "emoji": "⛏️",
-        "not_found_indicators": ["errorMessage", "null"],
-        "found_indicators": ["\"id\"", "\"name\""],
-    },
-    {
-        "name": "DeviantArt",
-        "url": "https://www.deviantart.com/{}",
-        "emoji": "🎨",
-        "not_found_indicators": ["Page Not Found", "This page is not available"],
-        "found_indicators": [],
-    },
-    {
-        "name": "Flickr",
-        "url": "https://www.flickr.com/people/{}",
-        "emoji": "📷",
-        "not_found_indicators": ["Page Not Found", "Oops"],
-        "found_indicators": [],
-    },
-    {
-        "name": "Patreon",
-        "url": "https://www.patreon.com/{}",
-        "emoji": "💰",
-        "not_found_indicators": ["Page Not Found", "404"],
-        "found_indicators": [],
-    },
-    {
-        "name": "Linktree",
-        "url": "https://linktr.ee/{}",
-        "emoji": "🌳",
-        "not_found_indicators": ["Sorry, this page isn\\'t available", "404"],
-        "found_indicators": [],
-    },
-    {
-        "name": "Soundcloud",
-        "url": "https://soundcloud.com/{}",
-        "emoji": "🎶",
-        "not_found_indicators": ["We can\\'t find that user", "404"],
-        "found_indicators": [],
-    },
-    {
-        "name": "Behance",
-        "url": "https://www.behance.net/{}",
-        "emoji": "🖼️",
-        "not_found_indicators": ["The page you requested was not found", "404"],
-        "found_indicators": [],
-    },
-    {
-        "name": "Medium",
-        "url": "https://medium.com/@{}",
-        "emoji": "✍️",
-        "not_found_indicators": ["Page not found", "404"],
-        "found_indicators": [],
-    },
+    {"name": "GitHub",     "url": "https://github.com/{}",                          "emoji": "💻", "not_found_indicators": ["Not Found", "This is not the web page you are looking for"], "found_indicators": []},
+    {"name": "Reddit",     "url": "https://www.reddit.com/user/{}/",                "emoji": "🟠", "not_found_indicators": ["Sorry, nobody on Reddit goes by that name", "page not found"], "found_indicators": []},
+    {"name": "Twitter/X",  "url": "https://twitter.com/{}",                         "emoji": "🐦", "not_found_indicators": ["This account doesn\\'t exist", "page does not exist", "account suspended"], "found_indicators": []},
+    {"name": "TikTok",     "url": "https://www.tiktok.com/@{}",                     "emoji": "🎵", "not_found_indicators": ["Couldn\\'t find this account", "couldn't find this account"], "found_indicators": ["followers", "following", "likes"]},
+    {"name": "Instagram",  "url": "https://www.instagram.com/{}/",                  "emoji": "📸", "not_found_indicators": ["Sorry, this page isn\\'t available", "Page Not Found"], "found_indicators": []},
+    {"name": "YouTube",    "url": "https://www.youtube.com/@{}",                    "emoji": "▶️", "not_found_indicators": ["404", "This page isn\\'t available"], "found_indicators": ["subscribers", "abonnés", "videos"]},
+    {"name": "Twitch",     "url": "https://www.twitch.tv/{}",                       "emoji": "🟣", "not_found_indicators": ["Sorry. Unless you\\'ve got a time machine", "404"], "found_indicators": []},
+    {"name": "Pinterest",  "url": "https://www.pinterest.com/{}/",                  "emoji": "📌", "not_found_indicators": ["The page you were looking for doesn\\'t exist", "Hmm, we couldn\\'t find that page"], "found_indicators": []},
+    {"name": "Snapchat",   "url": "https://www.snapchat.com/add/{}",                "emoji": "👻", "not_found_indicators": ["Sorry, we couldn\\'t find", "404"], "found_indicators": ["Add me on Snapchat", "snapchat.com/add"]},
+    {"name": "Steam",      "url": "https://steamcommunity.com/id/{}",               "emoji": "🎮", "not_found_indicators": ["The specified profile could not be found", "error"], "found_indicators": ["profile_header", "persona_name"]},
+    {"name": "Spotify",    "url": "https://open.spotify.com/user/{}",               "emoji": "🎧", "not_found_indicators": ["Page not found", "Spotify - Web Player"], "found_indicators": []},
+    {"name": "Roblox",     "url": "https://www.roblox.com/user.aspx?username={}",   "emoji": "🧱", "not_found_indicators": ["Page cannot be found", "404"], "found_indicators": []},
+    {"name": "Minecraft",  "url": "https://api.mojang.com/users/profiles/minecraft/{}", "emoji": "⛏️", "not_found_indicators": ["errorMessage", "null"], "found_indicators": ["\"id\"", "\"name\""]},
+    {"name": "DeviantArt", "url": "https://www.deviantart.com/{}",                  "emoji": "🎨", "not_found_indicators": ["Page Not Found", "This page is not available"], "found_indicators": []},
+    {"name": "Flickr",     "url": "https://www.flickr.com/people/{}",               "emoji": "📷", "not_found_indicators": ["Page Not Found", "Oops"], "found_indicators": []},
+    {"name": "Patreon",    "url": "https://www.patreon.com/{}",                     "emoji": "💰", "not_found_indicators": ["Page Not Found", "404"], "found_indicators": []},
+    {"name": "Linktree",   "url": "https://linktr.ee/{}",                           "emoji": "🌳", "not_found_indicators": ["Sorry, this page isn\\'t available", "404"], "found_indicators": []},
+    {"name": "Soundcloud", "url": "https://soundcloud.com/{}",                      "emoji": "🎶", "not_found_indicators": ["We can\\'t find that user", "404"], "found_indicators": []},
+    {"name": "Behance",    "url": "https://www.behance.net/{}",                     "emoji": "🖼️", "not_found_indicators": ["The page you requested was not found", "404"], "found_indicators": []},
+    {"name": "Medium",     "url": "https://medium.com/@{}",                         "emoji": "✍️", "not_found_indicators": ["Page not found", "404"], "found_indicators": []},
 ]
 
 async def check_platform(session: aiohttp.ClientSession, platform: dict, username: str) -> dict:
-    """Vérifie précisément si un profil existe via le contenu de la page."""
     url = platform["url"].format(username)
     try:
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=8), allow_redirects=True) as resp:
-            # Si 404 direct → pas trouvé
             if resp.status == 404:
                 return {"name": platform["name"], "emoji": platform["emoji"], "url": url, "found": False}
-
             if resp.status != 200:
                 return {"name": platform["name"], "emoji": platform["emoji"], "url": url, "found": False}
-
-            # Lire le contenu (limité à 50ko pour la perf)
             content = await resp.text(errors="ignore")
             content_lower = content.lower()
-
-            # Si indicateurs "non trouvé" présents → pas trouvé
             for indicator in platform.get("not_found_indicators", []):
                 if indicator.lower() in content_lower:
                     return {"name": platform["name"], "emoji": platform["emoji"], "url": url, "found": False}
-
-            # Si des indicateurs "trouvé" sont définis, au moins un doit être présent
             found_indicators = platform.get("found_indicators", [])
             if found_indicators:
                 for indicator in found_indicators:
                     if indicator.lower() in content_lower:
                         return {"name": platform["name"], "emoji": platform["emoji"], "url": url, "found": True}
                 return {"name": platform["name"], "emoji": platform["emoji"], "url": url, "found": False}
-
-            # Sinon, status 200 sans indicateur négatif = trouvé
             return {"name": platform["name"], "emoji": platform["emoji"], "url": url, "found": True}
-
     except Exception:
         return {"name": platform["name"], "emoji": platform["emoji"], "url": url, "found": False}
 
 
 @bot.tree.command(name="osint", description="🔍 Recherche OSINT sur un pseudo (réseaux sociaux, email, téléphone, adresse)")
-@discord.app_commands.describe(
-    pseudo="Pseudo à rechercher sur les réseaux sociaux",
-    email="Adresse email à rechercher (optionnel)",
-    telephone="Numéro de téléphone à rechercher (optionnel)",
-    adresse="Adresse / ville à rechercher (optionnel)"
-)
-async def osint(
-    interaction: discord.Interaction,
-    pseudo: str,
-    email: str = None,
-    telephone: str = None,
-    adresse: str = None
-):
-    # Defer car la recherche peut prendre du temps
+@discord.app_commands.describe(pseudo="Pseudo à rechercher", email="Email (optionnel)", telephone="Téléphone (optionnel)", adresse="Adresse (optionnel)")
+async def osint(interaction: discord.Interaction, pseudo: str, email: str = None, telephone: str = None, adresse: str = None):
     await interaction.response.defer(ephemeral=True)
-
-    # ── Vérification des plateformes ──
     found_platforms = []
     not_found_platforms = []
-
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
-
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
     async with aiohttp.ClientSession(headers=headers) as session:
         tasks = [check_platform(session, p, pseudo) for p in OSINT_PLATFORMS]
         results = await asyncio.gather(*tasks)
-
     for r in results:
-        if r["found"]:
-            found_platforms.append(r)
-        else:
-            not_found_platforms.append(r)
+        (found_platforms if r["found"] else not_found_platforms).append(r)
 
-    # ── Construction de l'embed principal ──
-    embed = discord.Embed(
-        title=f"🕵️ Rapport OSINT — `{pseudo}`",
-        color=discord.Color.dark_red()
-    )
+    embed = discord.Embed(title=f"🕵️ Rapport OSINT — `{pseudo}`", color=discord.Color.dark_red())
     embed.set_footer(text=f"Slayzix Shop • OSINT • Demandé par {interaction.user.name}")
     embed.timestamp = discord.utils.utcnow()
 
-    # Résultats réseaux sociaux
     if found_platforms:
-        found_text = "\n".join(
-            [f"{p['emoji']} **[{p['name']}]({p['url']})**  ✅" for p in found_platforms]
-        )
-        embed.add_field(
-            name=f"✅ Profils trouvés ({len(found_platforms)}/{len(OSINT_PLATFORMS)})",
-            value=found_text,
-            inline=False
-        )
+        found_text = "\n".join([f"{p['emoji']} **[{p['name']}]({p['url']})**  ✅" for p in found_platforms])
+        embed.add_field(name=f"✅ Profils trouvés ({len(found_platforms)}/{len(OSINT_PLATFORMS)})", value=found_text, inline=False)
     else:
-        embed.add_field(
-            name="✅ Profils trouvés",
-            value="❌ Aucun profil trouvé pour ce pseudo.",
-            inline=False
-        )
+        embed.add_field(name="✅ Profils trouvés", value="❌ Aucun profil trouvé pour ce pseudo.", inline=False)
 
     if not_found_platforms:
         not_found_text = "  ".join([f"{p['emoji']} ~~{p['name']}~~" for p in not_found_platforms])
-        embed.add_field(
-            name=f"❌ Non trouvé ({len(not_found_platforms)}/{len(OSINT_PLATFORMS)})",
-            value=not_found_text,
-            inline=False
-        )
+        embed.add_field(name=f"❌ Non trouvé ({len(not_found_platforms)}/{len(OSINT_PLATFORMS)})", value=not_found_text, inline=False)
 
     embed.add_field(name="​", value="──────────────────────", inline=False)
 
-    # ── Email ──
     if email:
-        # Validation basique du format
         email_valid = bool(re.match(r"^[\w\.\+\-]+@[\w\-]+\.[a-zA-Z]{2,}$", email))
         email_domain = email.split("@")[-1] if "@" in email else "?"
-        email_info = (
-            f"📧 **Adresse :** `{email}`\n"
-            f"🌐 **Domaine :** `{email_domain}`\n"
-            f"✅ **Format valide :** {'Oui' if email_valid else 'Non'}\n"
-            f"🔗 **Recherche :** [Google](https://www.google.com/search?q=%22{email}%22) | "
-            f"[HaveIBeenPwned](https://haveibeenpwned.com/account/{email})"
-        )
-        embed.add_field(name="📧 Email", value=email_info, inline=False)
+        embed.add_field(name="📧 Email", value=f"📧 **Adresse :** `{email}`\n🌐 **Domaine :** `{email_domain}`\n✅ **Format valide :** {'Oui' if email_valid else 'Non'}\n🔗 [Google](https://www.google.com/search?q=%22{email}%22) | [HaveIBeenPwned](https://haveibeenpwned.com/account/{email})", inline=False)
 
-    # ── Téléphone ──
     if telephone:
-        # Nettoyage du numéro
         phone_clean = re.sub(r"[\s\-\.\(\)]", "", telephone)
-        phone_info = (
-            f"📞 **Numéro :** `{telephone}`\n"
-            f"🔗 **Recherche :** [Google](https://www.google.com/search?q=%22{phone_clean}%22) | "
-            f"[NumLookup](https://www.numlookup.com/?number={phone_clean})"
-        )
-        embed.add_field(name="📞 Téléphone", value=phone_info, inline=False)
+        embed.add_field(name="📞 Téléphone", value=f"📞 **Numéro :** `{telephone}`\n🔗 [Google](https://www.google.com/search?q=%22{phone_clean}%22) | [NumLookup](https://www.numlookup.com/?number={phone_clean})", inline=False)
 
-    # ── Adresse ──
     if adresse:
         adresse_encoded = adresse.replace(" ", "+")
-        adresse_info = (
-            f"🏠 **Adresse :** `{adresse}`\n"
-            f"🔗 **Recherche :** [Google Maps](https://www.google.com/maps/search/{adresse_encoded}) | "
-            f"[Google](https://www.google.com/search?q=%22{adresse_encoded}%22)"
-        )
-        embed.add_field(name="🏠 Adresse", value=adresse_info, inline=False)
+        embed.add_field(name="🏠 Adresse", value=f"🏠 **Adresse :** `{adresse}`\n🔗 [Google Maps](https://www.google.com/maps/search/{adresse_encoded}) | [Google](https://www.google.com/search?q=%22{adresse_encoded}%22)", inline=False)
 
-    # ── Liens de recherche globaux ──
     pseudo_encoded = pseudo.replace(" ", "+")
-    global_links = (
-        f"[Google](https://www.google.com/search?q=%22{pseudo_encoded}%22) | "
-        f"[Sherlock](https://sherlock-project.github.io/) | "
-        f"[WhatsMyName](https://whatsmyname.app/?q={pseudo})"
-    )
-    embed.add_field(name="🌐 Recherches globales", value=global_links, inline=False)
-
-    embed.add_field(
-        name="⚠️ Avertissement",
-        value="*Ces données proviennent de sources **publiques** uniquement. Utilisation éthique et légale uniquement.*",
-        inline=False
-    )
+    embed.add_field(name="🌐 Recherches globales", value=f"[Google](https://www.google.com/search?q=%22{pseudo_encoded}%22) | [Sherlock](https://sherlock-project.github.io/) | [WhatsMyName](https://whatsmyname.app/?q={pseudo})", inline=False)
+    embed.add_field(name="⚠️ Avertissement", value="*Ces données proviennent de sources **publiques** uniquement. Utilisation éthique et légale uniquement.*", inline=False)
 
     await interaction.followup.send(embed=embed, ephemeral=True)
 
@@ -1229,6 +1227,11 @@ async def osint(
 async def on_ready():
     await bot.tree.sync()
     print(f"✅ {bot.user} connecté et slash commands synchronisées !")
+    print("🎵 Module music : OK")
+    print("🎫 Module tickets : OK")
+    print("🎉 Module giveaway : OK")
+    print("📝 Module vouch : OK")
+    print("🔍 Module OSINT : OK")
 
 
 # ================= START =================
