@@ -16,7 +16,15 @@ ticket_config = {
     "category": None,
     "log_channel": None,
     "support_role": None,
-    "nitro_ping_role": None,  # Rôle à ping pour les tickets Nitro
+    # Rôles ping par langue
+    "role_french": None,
+    "role_english": None,
+    # Rôles ping par type de ticket
+    "role_nitro": None,
+    "role_boost": None,
+    "role_decoration": None,
+    "role_exchange": None,
+    "role_other": None,
 }
 
 open_tickets = {}  # user_id -> channel_id
@@ -84,7 +92,7 @@ LANG_OPTIONS = [
 
 MESSAGES = {
     "fr": {
-        "ticket_title":   "🎫 Nouveau Ticket",
+        "ticket_title":   "<:Nitroo:1480046413441273968> Nouveau Ticket",
         "ticket_desc":    "Le support sera avec vous rapidement.\n\nPour fermer ce ticket, appuyez sur le bouton Fermer.",
         "ping_staff_tip": "🔔 Utilisez **Ping Staff** si aucune réponse après 15 min (cooldown 15 min)",
         "close":          "🔴 Fermer",
@@ -98,7 +106,7 @@ MESSAGES = {
         "created":        "✅ Ticket créé →",
     },
     "en": {
-        "ticket_title":   "🎫 New Ticket",
+        "ticket_title":   "<:Nitroo:1480046413441273968> New Ticket",
         "ticket_desc":    "Support will be with you shortly.\n\nTo close this ticket, press the close button below.",
         "ping_staff_tip": "🔔 Use **Ping Staff** if no response after 15 min (15 min cooldown)",
         "close":          "🔴 Close",
@@ -128,11 +136,11 @@ class TicketActionsView(discord.ui.View):
         self.lang = lang
         m = MESSAGES[lang]
         # On crée les boutons dynamiquement pour avoir les bons labels
-        close_btn = discord.ui.Button(label=m["close"], style=discord.ButtonStyle.danger, custom_id="ticket_close", row=0)
-        claim_btn = discord.ui.Button(label=m["claim"], style=discord.ButtonStyle.success, custom_id="ticket_claim", row=0)
-        unclaim_btn = discord.ui.Button(label=m["unclaim"], style=discord.ButtonStyle.secondary, custom_id="ticket_unclaim", row=0)
+        close_btn = discord.ui.Button(label=m["close"], style=discord.ButtonStyle.danger, custom_id="ticket_close", emoji="<:Other:1480047561615085638>", row=0)
+        claim_btn = discord.ui.Button(label=m["claim"], style=discord.ButtonStyle.success, custom_id="ticket_claim", emoji="<:Boost:1480046746146050149>", row=0)
+        unclaim_btn = discord.ui.Button(label=m["unclaim"], style=discord.ButtonStyle.secondary, custom_id="ticket_unclaim", emoji="<:Other:1480047561615085638>", row=0)
         transcript_btn = discord.ui.Button(label=m["transcript"], style=discord.ButtonStyle.primary, custom_id="ticket_transcript", emoji="<:Transcript:1480047021707759727>", row=0)
-        ping_btn = discord.ui.Button(label=m["ping_staff"], style=discord.ButtonStyle.secondary, emoji="🔔", custom_id="ticket_ping_staff", row=1)
+        ping_btn = discord.ui.Button(label=m["ping_staff"], style=discord.ButtonStyle.secondary, emoji="<:Discord:1480047123188944906>", custom_id="ticket_ping_staff", row=1)
 
         close_btn.callback = self.close_callback
         claim_btn.callback = self.claim_callback
@@ -356,6 +364,21 @@ async def create_ticket_channel(interaction: discord.Interaction, ticket_type: s
     mention_str = user.mention
     if ticket_config["support_role"]:
         mention_str += f" <@&{ticket_config['support_role']}>"
+    # Ping rôle langue
+    lang_role_key = "role_french" if lang == "fr" else "role_english"
+    if ticket_config.get(lang_role_key):
+        mention_str += f" <@&{ticket_config[lang_role_key]}>"
+    # Ping rôle type
+    type_role_map = {
+        "Nitro": "role_nitro",
+        "Server Boost": "role_boost",
+        "Decoration": "role_decoration",
+        "Exchange": "role_exchange",
+        "Other": "role_other",
+    }
+    type_role_key = type_role_map.get(ticket_type)
+    if type_role_key and ticket_config.get(type_role_key):
+        mention_str += f" <@&{ticket_config[type_role_key]}>"
 
     # Embed dans le ticket
     flag = "🇫🇷" if lang == "fr" else "🇬🇧"
@@ -364,9 +387,9 @@ async def create_ticket_channel(interaction: discord.Interaction, ticket_type: s
         description=m["ticket_desc"],
         color=discord.Color.red()
     )
-    embed.add_field(name="📦 Type", value=ticket_type, inline=True)
-    embed.add_field(name="💳 Payment", value=payment, inline=True)
-    embed.add_field(name=f"{flag} Language", value="Français" if lang == "fr" else "English", inline=True)
+    embed.add_field(name="<:Nitroo:1480046413441273968> Type", value=ticket_type, inline=True)
+    embed.add_field(name="<:Paiement:1480046846658351276> Payment", value=payment, inline=True)
+    embed.add_field(name="🌍 Language", value="🇫🇷 Français" if lang == "fr" else "🇬🇧 English", inline=True)
     embed.set_footer(text=m["ping_staff_tip"])
     embed.timestamp = discord.utils.utcnow()
 
@@ -632,6 +655,13 @@ async def help_cmd(interaction: discord.Interaction):
         name="🎫 __Tickets__",
         value=(
             "`*setup` — *(Admin)* Configure et déploie le panel de tickets\n"
+            "`*setfrench @role` — *(Admin)* Rôle pingé pour les tickets FR\n"
+            "`*setenglish @role` — *(Admin)* Rôle pingé pour les tickets EN\n"
+            "`*setnitro @role` — *(Admin)* Rôle pingé pour Nitro\n"
+            "`*setboost @role` — *(Admin)* Rôle pingé pour Server Boost\n"
+            "`*setdeco @role` — *(Admin)* Rôle pingé pour Decoration\n"
+            "`*setexchange @role` — *(Admin)* Rôle pingé pour Exchange\n"
+            "`*setother @role` — *(Admin)* Rôle pingé pour Other\n"
         ),
         inline=False
     )
@@ -661,6 +691,34 @@ async def help_cmd(interaction: discord.Interaction):
     embed.set_footer(text="Préfixe : * • Slash : /help uniquement")
     embed.timestamp = discord.utils.utcnow()
     await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+# ================= SET ROLE COMMANDS =================
+
+def make_set_role_command(name, config_key, label):
+    @bot.command(name=name)
+    @commands.has_permissions(administrator=True)
+    async def _cmd(ctx, role: discord.Role):
+        ticket_config[config_key] = role.id
+        await ctx.message.delete()
+        embed = discord.Embed(
+            title="✅ Rôle configuré",
+            description=f"**{label}** → {role.mention}",
+            color=discord.Color.green()
+        )
+        await ctx.send(embed=embed, delete_after=8)
+    _cmd.__name__ = name
+    return _cmd
+
+# Langue
+setfrench   = make_set_role_command("setfrench",     "role_french",     "🇫🇷 Rôle Français")
+setenglish  = make_set_role_command("setenglish",    "role_english",    "🇬🇧 Rôle English")
+# Types
+setnitro    = make_set_role_command("setnitro",      "role_nitro",      "<:Nitro:1480046132707987611> Rôle Nitro")
+setboost    = make_set_role_command("setboost",      "role_boost",      "<:Boost:1480046746146050149> Rôle Server Boost")
+setdeco     = make_set_role_command("setdeco",       "role_decoration", "<:Discord:1480047123188944906> Rôle Decoration")
+setexchange = make_set_role_command("setexchange",   "role_exchange",   "<:Exchange:1480047481491427492> Rôle Exchange")
+setother    = make_set_role_command("setother",      "role_other",      "<:Other:1480047561615085638> Rôle Other")
 
 # ================= ON READY =================
 
