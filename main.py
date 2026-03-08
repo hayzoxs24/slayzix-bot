@@ -8,7 +8,7 @@ from datetime import datetime
 # ================= INTENTS & BOT =================
 
 intents = discord.Intents.all()
-bot = commands.Bot(command_prefix="!", intents=intents)
+bot = commands.Bot(command_prefix="*", intents=intents)
 
 # ================= CONFIG =================
 
@@ -678,7 +678,7 @@ async def on_ready():
 
 if __name__ == "__main__":
     import os
-    TOKEN = os.environ.get("TOKEN")
+    TOKEN = os.environ.get("DISCORD_TOKEN")
     if not TOKEN:
-        raise ValueError("❌ TOKEN introuvable ! Ajoute la variable d'environnement TOKEN sur Railway.")
+        raise ValueError("❌ TOKEN introuvable ! Ajoute la variable d'environnement DISCORD_TOKEN sur Railway.")
     bot.run(TOKEN)
