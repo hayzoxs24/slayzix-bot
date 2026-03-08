@@ -425,13 +425,21 @@ class SetupView(discord.ui.View):
     @discord.ui.button(label="📨 Envoyer le panel ici", style=discord.ButtonStyle.success, row=2)
     async def send_panel(self, interaction: discord.Interaction, button: discord.ui.Button):
         panel_embed = discord.Embed(
-            title="🎫 Support Ticket System",
+            title="🎫  Support Ticket System",
             description=(
-                "Select a category below to create a support ticket.\n\n"
-                "Our team will assist you as soon as possible."
+                "**Select a category below to create a support ticket.**\n\n"
+                "Our team will assist you as soon as possible.\n\n"
+                "────────────────────────\n"
+                "💎 **Nitro** — Discord Nitro\n"
+                "🚀 **Server Boost** — Server Boost\n"
+                "🎨 **Decoration** — Profile Decoration\n"
+                "🔄 **Exchange** — Trade / Exchange\n"
+                "📌 **Other** — Other request\n"
+                "────────────────────────"
             ),
             color=discord.Color.from_rgb(180, 0, 0)
         )
+        panel_embed.set_image(url="https://i.ibb.co/ksvCtjxC/a.png")
         panel_embed.set_footer(text="Please provide detailed information in your ticket")
         await interaction.channel.send(embed=panel_embed, view=TicketPanelView())
         await interaction.response.send_message("✅ Panel envoyé !", ephemeral=True)
