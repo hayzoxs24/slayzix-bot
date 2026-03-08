@@ -104,6 +104,7 @@ MESSAGES = {
         "closed_by":      "Ticket fermé par",
         "already_open":   "❌ Tu as déjà un ticket ouvert →",
         "created":        "✅ Ticket créé →",
+        "finish":         "✅ Finish",
     },
     "en": {
         "ticket_title":   "<:Nitroo:1480046413441273968> New Ticket",
@@ -118,12 +119,14 @@ MESSAGES = {
         "closed_by":      "Ticket closed by",
         "already_open":   "❌ You already have an open ticket →",
         "created":        "✅ Ticket created →",
+        "finish":         "✅ Finish",
     }
 }
 
 # ================= PING STAFF COOLDOWN =================
 
 ping_staff_cooldown = {}  # channel_id -> last_ping timestamp
+ticket_claimers = {}  # channel_id -> claimer member id
 
 
 # ================= VIEWS =================
@@ -137,22 +140,25 @@ class TicketActionsView(discord.ui.View):
         self.ticket_type = ticket_type
         m = MESSAGES[lang]
         # On crée les boutons dynamiquement pour avoir les bons labels
-        close_btn = discord.ui.Button(label=m["close"], style=discord.ButtonStyle.secondary, custom_id="ticket_close", emoji="<:Other:1480047561615085638>", row=0)
-        claim_btn = discord.ui.Button(label=m["claim"], style=discord.ButtonStyle.secondary, custom_id="ticket_claim", emoji="<:Boost:1480046746146050149>", row=0)
-        unclaim_btn = discord.ui.Button(label=m["unclaim"], style=discord.ButtonStyle.secondary, custom_id="ticket_unclaim", emoji="<:Exchange:1480047481491427492>", row=0)
-        transcript_btn = discord.ui.Button(label=m["transcript"], style=discord.ButtonStyle.secondary, custom_id="ticket_transcript", emoji="<:Transcript:1480047021707759727>", row=0)
-        ping_btn = discord.ui.Button(label=m["ping_staff"], style=discord.ButtonStyle.secondary, emoji="<:Discord:1480047123188944906>", custom_id="ticket_ping_staff", row=1)
+        close_btn      = discord.ui.Button(label=m["close"],       style=discord.ButtonStyle.secondary, custom_id="ticket_close",      emoji="<:Other:1480047561615085638>",    row=0)
+        claim_btn      = discord.ui.Button(label=m["claim"],       style=discord.ButtonStyle.secondary, custom_id="ticket_claim",      emoji="<:Boost:1480046746146050149>",    row=0)
+        unclaim_btn    = discord.ui.Button(label=m["unclaim"],     style=discord.ButtonStyle.secondary, custom_id="ticket_unclaim",    emoji="<:Exchange:1480047481491427492>", row=0)
+        transcript_btn = discord.ui.Button(label=m["transcript"],  style=discord.ButtonStyle.secondary, custom_id="ticket_transcript", emoji="<:Transcript:1480047021707759727>", row=0)
+        finish_btn     = discord.ui.Button(label=m["finish"],      style=discord.ButtonStyle.success,   custom_id="ticket_finish",     emoji="✅",                               row=0)
+        ping_btn       = discord.ui.Button(label=m["ping_staff"],  style=discord.ButtonStyle.secondary, emoji="<:Discord:1480047123188944906>", custom_id="ticket_ping_staff",   row=1)
 
-        close_btn.callback = self.close_callback
-        claim_btn.callback = self.claim_callback
-        unclaim_btn.callback = self.unclaim_callback
+        close_btn.callback      = self.close_callback
+        claim_btn.callback      = self.claim_callback
+        unclaim_btn.callback    = self.unclaim_callback
         transcript_btn.callback = self.transcript_callback
-        ping_btn.callback = self.ping_staff_callback
+        finish_btn.callback     = self.finish_callback
+        ping_btn.callback       = self.ping_staff_callback
 
         self.add_item(close_btn)
         self.add_item(claim_btn)
         self.add_item(unclaim_btn)
         self.add_item(transcript_btn)
+        self.add_item(finish_btn)
         self.add_item(ping_btn)
 
     async def close_callback(self, interaction: discord.Interaction):
@@ -178,6 +184,7 @@ class TicketActionsView(discord.ui.View):
         await interaction.channel.delete()
 
     async def claim_callback(self, interaction: discord.Interaction):
+        ticket_claimers[interaction.channel.id] = interaction.user.id
         embed = discord.Embed(
             description=f"✅ Ticket pris en charge par {interaction.user.mention}" if self.lang == "fr" else f"✅ Ticket claimed by {interaction.user.mention}",
             color=discord.Color.green()
@@ -210,6 +217,132 @@ class TicketActionsView(discord.ui.View):
             file=file,
             ephemeral=True
         )
+
+    async def finish_callback(self, interaction: discord.Interaction):
+        """Envoie un modal vouch pré-rempli au client."""
+        # Trouve le staff qui a claim le ticket
+        claimer_id = ticket_claimers.get(interaction.channel.id)
+        claimer = interaction.guild.get_member(claimer_id) if claimer_id else None
+
+        class VouchModal(discord.ui.Modal, title="⭐ Leave a Review"):
+            rating_input = discord.ui.TextInput(
+                label="Rating (1 to 5)",
+                placeholder="5",
+                max_length=1,
+                required=True
+            )
+            service_input = discord.ui.TextInput(
+                label="Service purchased",
+                placeholder="e.g. Nitro Basic",
+                required=True,
+                max_length=100
+            )
+            comment_input = discord.ui.TextInput(
+                label="Comment",
+                placeholder="Fast, legit, great service...",
+                style=discord.TextStyle.long,
+                required=True,
+                max_length=500
+            )
+
+            def __init__(self_, claimer_member):
+                super().__init__()
+                self_.claimer_member = claimer_member
+
+            async def on_submit(self_, modal_interaction: discord.Interaction):
+                try:
+                    rating = int(self_.rating_input.value.strip())
+                    if rating < 1 or rating > 5:
+                        return await modal_interaction.response.send_message("❌ Rating must be between 1 and 5.", ephemeral=True)
+                except ValueError:
+                    return await modal_interaction.response.send_message("❌ Rating must be a number.", ephemeral=True)
+
+                staff = self_.claimer_member
+                service = self_.service_input.value.strip()
+                comment = self_.comment_input.value.strip()
+
+                if not staff:
+                    return await modal_interaction.response.send_message("❌ No staff found for this ticket. Ask staff to click **Claim** first.", ephemeral=True)
+
+                stars = "⭐" * rating + "🌑" * (5 - rating)
+                badges = {1: "😡 Very bad", 2: "😕 Bad", 3: "😐 Average", 4: "😊 Good", 5: "🤩 Excellent!"}
+
+                staff_id = str(staff.id)
+                vouch_counts[staff_id] = vouch_counts.get(staff_id, 0) + 1
+                staff_total = vouch_counts[staff_id]
+                save_vouches(vouch_counts)
+
+                embed = discord.Embed(title="📝 New Review — Slayzix Shop", color=discord.Color.from_rgb(255, 0, 0))
+                embed.add_field(name="👤 Customer", value=modal_interaction.user.mention, inline=True)
+                embed.add_field(name="🛠️ Staff", value=staff.mention, inline=True)
+                embed.add_field(name="📦 Service", value=f"**{service}**", inline=True)
+                embed.add_field(name="⭐ Rating", value=f"{stars}  `{rating}/5` — {badges[rating]}", inline=False)
+                embed.add_field(name="💬 Comment", value=f"*{comment}*", inline=False)
+                embed.add_field(name="🏆 Staff Vouches", value=f"`{staff_total}` vouch(s) total", inline=False)
+                embed.set_thumbnail(url=modal_interaction.user.display_avatar.url)
+                embed.set_footer(text="Slayzix Shop • Thank you for your review!")
+                embed.timestamp = discord.utils.utcnow()
+
+                # Rôle auto +X vouch
+                new_role_name = f"+{staff_total} vouch"
+                existing_role = discord.utils.get(modal_interaction.guild.roles, name=new_role_name)
+                if not existing_role:
+                    try:
+                        existing_role = await modal_interaction.guild.create_role(
+                            name=new_role_name,
+                            color=discord.Color.from_rgb(255, 0, 0),
+                            reason=f"Vouch auto-role: {staff_total} vouches"
+                        )
+                        admin_roles = [r for r in modal_interaction.guild.roles if r.permissions.administrator and r != modal_interaction.guild.default_role]
+                        if admin_roles:
+                            lowest_admin = min(admin_roles, key=lambda r: r.position)
+                            try:
+                                await existing_role.edit(position=max(1, lowest_admin.position - 1))
+                            except Exception:
+                                pass
+                    except discord.Forbidden:
+                        existing_role = None
+
+                if staff_total > 1:
+                    old_role = discord.utils.get(modal_interaction.guild.roles, name=f"+{staff_total - 1} vouch")
+                    if old_role and old_role in staff.roles:
+                        try:
+                            await staff.remove_roles(old_role)
+                        except discord.Forbidden:
+                            pass
+
+                if existing_role and existing_role not in staff.roles:
+                    try:
+                        await staff.add_roles(existing_role)
+                    except discord.Forbidden:
+                        pass
+
+                # Rôle de base au customer
+                if vouch_config["role"]:
+                    base_role = modal_interaction.guild.get_role(vouch_config["role"])
+                    if base_role and base_role not in modal_interaction.user.roles:
+                        try:
+                            await modal_interaction.user.add_roles(base_role)
+                        except discord.Forbidden:
+                            pass
+
+                if vouch_config["channel"]:
+                    ch = modal_interaction.guild.get_channel(vouch_config["channel"])
+                    if ch:
+                        await ch.send(embed=embed)
+
+                await modal_interaction.response.send_message(
+                    f"✅ Review submitted! Thank you 🙏",
+                    ephemeral=True
+                )
+
+        if not claimer:
+            return await interaction.response.send_message(
+                "❌ No staff has claimed this ticket yet. Ask your staff to click **Claim** first!",
+                ephemeral=True
+            )
+
+        await interaction.response.send_modal(VouchModal(claimer))
 
     async def ping_staff_callback(self, interaction: discord.Interaction):
         now = datetime.utcnow().timestamp()
