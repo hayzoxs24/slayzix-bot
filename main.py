@@ -137,10 +137,10 @@ class TicketActionsView(discord.ui.View):
         self.ticket_type = ticket_type
         m = MESSAGES[lang]
         # On crée les boutons dynamiquement pour avoir les bons labels
-        close_btn = discord.ui.Button(label=m["close"], style=discord.ButtonStyle.danger, custom_id="ticket_close", emoji="<:Other:1480047561615085638>", row=0)
-        claim_btn = discord.ui.Button(label=m["claim"], style=discord.ButtonStyle.success, custom_id="ticket_claim", emoji="<:Boost:1480046746146050149>", row=0)
+        close_btn = discord.ui.Button(label=m["close"], style=discord.ButtonStyle.secondary, custom_id="ticket_close", emoji="<:Other:1480047561615085638>", row=0)
+        claim_btn = discord.ui.Button(label=m["claim"], style=discord.ButtonStyle.secondary, custom_id="ticket_claim", emoji="<:Boost:1480046746146050149>", row=0)
         unclaim_btn = discord.ui.Button(label=m["unclaim"], style=discord.ButtonStyle.secondary, custom_id="ticket_unclaim", emoji="<:Exchange:1480047481491427492>", row=0)
-        transcript_btn = discord.ui.Button(label=m["transcript"], style=discord.ButtonStyle.primary, custom_id="ticket_transcript", emoji="<:Transcript:1480047021707759727>", row=0)
+        transcript_btn = discord.ui.Button(label=m["transcript"], style=discord.ButtonStyle.secondary, custom_id="ticket_transcript", emoji="<:Transcript:1480047021707759727>", row=0)
         ping_btn = discord.ui.Button(label=m["ping_staff"], style=discord.ButtonStyle.secondary, emoji="<:Discord:1480047123188944906>", custom_id="ticket_ping_staff", row=1)
 
         close_btn.callback = self.close_callback
@@ -721,6 +721,9 @@ async def help_cmd(interaction: discord.Interaction):
         value=(
             "`*say` — Send a message as the bot\n"
             "`*wearelegit` — *(Admin)* Post the legit vote panel\n"
+            "`*stats @user` — *(Manage)* Affiche les stats d'un membre\n"
+            "`*setvouchrole <nb> @role` — *(Admin)* Rôle milestone vouchs\n"
+            "`*vouchcount @user` — Voir le nb de vouchs d'un membre\n"
         ),
         inline=False
     )
@@ -776,6 +779,10 @@ vouch_config = {
     "channel": None,
     "role": None,
 }
+# Stocke le nombre de vouchs par user: { "staff_id": count }
+vouch_counts: dict = {}
+# Stocke les rôles milestone: { 1: role_id, 5: role_id, 10: role_id, ... }
+vouch_milestone_roles: dict = {}
 
 class SetVouchChannelSelect(discord.ui.ChannelSelect):
     def __init__(self):
@@ -811,6 +818,7 @@ async def vouchsetup(ctx):
 @bot.tree.command(name="vouch", description="⭐ Leave a review for the shop")
 @discord.app_commands.describe(
     rating="Your rating out of 5",
+    staff="The staff member who helped you",
     service="Service purchased",
     comment="Your comment"
 )
@@ -821,27 +829,64 @@ async def vouchsetup(ctx):
     discord.app_commands.Choice(name="⭐⭐⭐⭐ 4/5", value=4),
     discord.app_commands.Choice(name="⭐⭐⭐⭐⭐ 5/5", value=5),
 ])
-async def vouch(interaction: discord.Interaction, rating: int, service: str, comment: str):
+async def vouch(interaction: discord.Interaction, rating: int, staff: discord.Member, service: str, comment: str):
     stars = "⭐" * rating + "🌑" * (5 - rating)
     colors = {1: 0xed4245, 2: 0xe67e22, 3: 0xfee75c, 4: 0x57f287, 5: 0xff0000}
     badges = {1: "😡 Very bad", 2: "😕 Bad", 3: "😐 Average", 4: "😊 Good", 5: "🤩 Excellent!"}
-    embed = discord.Embed(title="📝 New Review — Slayzix Shop", color=colors[rating])
+
+    # Incrément du compteur de vouchs du staff
+    staff_id = str(staff.id)
+    vouch_counts[staff_id] = vouch_counts.get(staff_id, 0) + 1
+    staff_total = vouch_counts[staff_id]
+
+    embed = discord.Embed(title="📝 New Review — Slayzix Shop", color=discord.Color.from_rgb(255, 0, 0))
     embed.add_field(name="👤 Customer", value=interaction.user.mention, inline=True)
+    embed.add_field(name="🛠️ Staff", value=staff.mention, inline=True)
     embed.add_field(name="📦 Service", value=f"**{service}**", inline=True)
     embed.add_field(name="⭐ Rating", value=f"{stars}  `{rating}/5` — {badges[rating]}", inline=False)
     embed.add_field(name="💬 Comment", value=f"*{comment}*", inline=False)
+    embed.add_field(name="🏆 Staff Vouches", value=f"`{staff_total}` vouch(s) total", inline=False)
     embed.set_thumbnail(url=interaction.user.display_avatar.url)
     embed.set_footer(text="Slayzix Shop • Thank you for your review!")
     embed.timestamp = discord.utils.utcnow()
 
-    role_added = False
-    role = None
-    if vouch_config["role"]:
-        role = interaction.guild.get_role(vouch_config["role"])
-        if role and role not in interaction.user.roles:
+    # Attribution automatique du rôle "+X vouch" au staff
+    # Cherche si le rôle existe déjà, sinon le crée
+    new_role_name = f"+{staff_total} vouch"
+    existing_role = discord.utils.get(interaction.guild.roles, name=new_role_name)
+    if not existing_role:
+        try:
+            existing_role = await interaction.guild.create_role(
+                name=new_role_name,
+                color=discord.Color.from_rgb(255, 0, 0),
+                reason=f"Vouch auto-role: {staff_total} vouches"
+            )
+        except discord.Forbidden:
+            existing_role = None
+
+    # Retire l'ancien rôle vouch du staff (le précédent)
+    if staff_total > 1:
+        old_role_name = f"+{staff_total - 1} vouch"
+        old_role = discord.utils.get(interaction.guild.roles, name=old_role_name)
+        if old_role and old_role in staff.roles:
             try:
-                await interaction.user.add_roles(role, reason="Vouch submitted")
-                role_added = True
+                await staff.remove_roles(old_role, reason="Vouch role upgrade")
+            except discord.Forbidden:
+                pass
+
+    # Donne le nouveau rôle
+    if existing_role and existing_role not in staff.roles:
+        try:
+            await staff.add_roles(existing_role, reason=f"Vouch auto-role: {staff_total} vouches")
+        except discord.Forbidden:
+            pass
+
+    # Rôle de base au customer
+    if vouch_config["role"]:
+        base_role = interaction.guild.get_role(vouch_config["role"])
+        if base_role and base_role not in interaction.user.roles:
+            try:
+                await interaction.user.add_roles(base_role, reason="Vouch submitted")
             except discord.Forbidden:
                 pass
 
@@ -849,11 +894,42 @@ async def vouch(interaction: discord.Interaction, rating: int, service: str, com
         ch = interaction.guild.get_channel(vouch_config["channel"])
         if ch:
             await ch.send(embed=embed)
-            msg = f"✅ Review posted in {ch.mention}, thank you! 🙏"
-            if role_added:
-                msg += f"\n🎖️ Role **{role.name}** given!"
-            return await interaction.response.send_message(msg, ephemeral=True)
+            return await interaction.response.send_message(
+                f"✅ Review posted in {ch.mention}! Thank you 🙏\n🏆 {staff.display_name} now has **{staff_total}** vouch(s) → role **+{staff_total} vouch** given!",
+                ephemeral=True
+            )
     await interaction.response.send_message(embed=embed)
+
+
+@bot.command(name="setvouchrole")
+@commands.has_permissions(administrator=True)
+async def setvouchrole(ctx, milestone: int, role: discord.Role):
+    """Configure un rôle milestone pour les vouchs. Ex: *setvouchrole 5 @role"""
+    vouch_milestone_roles[milestone] = role.id
+    await ctx.message.delete()
+    await ctx.send(
+        embed=discord.Embed(
+            title="✅ Vouch Milestone configuré",
+            description=f"À **{milestone}** vouch(s) → {role.mention}",
+            color=discord.Color.from_rgb(255, 0, 0)
+        ),
+        delete_after=8
+    )
+
+
+@bot.command(name="vouchcount")
+async def vouchcount(ctx, member: discord.Member = None):
+    """Affiche le nombre de vouchs d'un membre."""
+    target = member or ctx.author
+    await ctx.message.delete()
+    count = vouch_counts.get(str(target.id), 0)
+    embed = discord.Embed(
+        title="🏆 Vouch Count",
+        description=f"{target.mention} has **{count}** vouch(s).",
+        color=discord.Color.from_rgb(255, 0, 0)
+    )
+    embed.set_thumbnail(url=target.display_avatar.url)
+    await ctx.send(embed=embed)
 
 
 # ================= GIVEAWAY =================
@@ -1073,7 +1149,89 @@ async def wearelegit(ctx):
     embed.set_image(url="https://i.ibb.co/fdJxKj7c/BANNIERE.png")
     embed.set_footer(text="Slayzix Legit ?")
     msg = await ctx.send(embed=embed)
-    await msg.edit(view=LegitView(msg.id))
+    pass  # No buttons, reactions added manually
+
+
+# ================= STATS =================
+
+@bot.command(name="stats")
+@commands.has_permissions(manage_guild=True)
+async def stats(ctx, member: discord.Member = None):
+    """Affiche les stats d'un membre depuis son arrivée sur le serveur."""
+    await ctx.message.delete()
+    target = member or ctx.author
+
+    # Dates
+    joined_at = target.joined_at
+    created_at = target.created_at
+    now = discord.utils.utcnow()
+
+    joined_days = (now - joined_at).days if joined_at else 0
+    account_days = (now - created_at).days
+
+    # Rôles (sans @everyone)
+    roles = [r.mention for r in reversed(target.roles) if r.name != "@everyone"]
+    roles_str = " ".join(roles) if roles else "Aucun rôle"
+
+    # Vouch count du membre
+    vouch_total = vouch_counts.get(str(target.id), 0)
+
+    # Badges / statut
+    status_map = {
+        discord.Status.online: "🟢 Online",
+        discord.Status.idle: "🟡 Idle",
+        discord.Status.dnd: "🔴 Do Not Disturb",
+        discord.Status.offline: "⚫ Offline",
+    }
+    status_str = status_map.get(target.status, "⚫ Offline")
+
+    embed = discord.Embed(
+        title=f"📊 Stats — {target.display_name}",
+        color=discord.Color.from_rgb(255, 0, 0)
+    )
+    embed.set_thumbnail(url=target.display_avatar.url)
+
+    embed.add_field(
+        name="👤 Compte",
+        value=(
+            f"**Nom :** {target.name}\n"
+            f"**ID :** `{target.id}`\n"
+            f"**Statut :** {status_str}"
+        ),
+        inline=True
+    )
+    embed.add_field(
+        name="📅 Dates",
+        value=(
+            f"**Compte créé :** <t:{int(created_at.timestamp())}:D>\n"
+            f"**(`{account_days}` jours)** \n"
+            f"**Rejoint le :** <t:{int(joined_at.timestamp())}:D>\n"
+            f"**(`{joined_days}` jours sur le serv)**"
+        ),
+        inline=True
+    )
+    embed.add_field(
+        name="🏆 Vouchs reçus",
+        value=f"`{vouch_total}` vouch(s)",
+        inline=True
+    )
+    embed.add_field(
+        name=f"🎭 Rôles ({len(roles)})",
+        value=roles_str[:1024] if roles_str else "Aucun",
+        inline=False
+    )
+
+    # Invité par (bot Discord ne peut pas savoir qui a invité nativement sans audit log)
+    try:
+        async for entry in ctx.guild.audit_logs(action=discord.AuditLogAction.invite, limit=50):
+            pass  # placeholder
+    except Exception:
+        pass
+
+    embed.set_footer(text=f"Slayzix Shop • Stats de {target.name}")
+    embed.timestamp = discord.utils.utcnow()
+
+    await ctx.send(embed=embed)
 
 # ================= ON READY =================
 
@@ -1090,6 +1248,7 @@ async def on_ready():
     print("🎉 Giveaway      : OK")
     print("📢 Say           : OK")
     print("🙏 WeAreLegit    : OK")
+    print("📊 Stats         : OK")
 
 
 # ================= START =================
