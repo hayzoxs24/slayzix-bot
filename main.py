@@ -1020,8 +1020,8 @@ class LegitView(discord.ui.View):
         self.no_count = 0
         self.voters = set()
 
-        yes_btn = discord.ui.Button(label=str(self.yes_count), style=discord.ButtonStyle.danger, emoji="<:oui:1480176155989508348>", custom_id=f"legit_yes_{msg_id}", row=0)
-        no_btn  = discord.ui.Button(label=str(self.no_count),  style=discord.ButtonStyle.danger, emoji="<:non:1480176175589621821>", custom_id=f"legit_no_{msg_id}",  row=0)
+        yes_btn = discord.ui.Button(label=str(self.yes_count), style=discord.ButtonStyle.secondary, emoji="<:oui:1480176155989508348>", custom_id=f"legit_yes_{msg_id}", row=0)
+        no_btn  = discord.ui.Button(label=str(self.no_count),  style=discord.ButtonStyle.secondary, emoji="<:non:1480176175589621821>", custom_id=f"legit_no_{msg_id}",  row=0)
 
         yes_btn.callback = self.yes_callback
         no_btn.callback  = self.no_callback
@@ -1065,7 +1065,7 @@ async def wearelegit(ctx):
         description="<:oui:1480176155989508348> = Yes\n<:non:1480176175589621821> No = **Ban**",
         color=discord.Color.red()
     )
-    embed.set_image(url="https://i.ibb.co/ksvCtjxC/a.png")
+    embed.set_image(url="https://i.ibb.co/fdJxKj7c/BANNIERE.png")
     embed.timestamp = discord.utils.utcnow()
     msg = await ctx.send(embed=embed)
     await msg.edit(view=LegitView(msg.id))
