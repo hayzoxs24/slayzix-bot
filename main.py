@@ -144,7 +144,7 @@ class TicketActionsView(discord.ui.View):
         claim_btn      = discord.ui.Button(label=m["claim"],       style=discord.ButtonStyle.secondary, custom_id="ticket_claim",      emoji="<:Boost:1480046746146050149>",    row=0)
         unclaim_btn    = discord.ui.Button(label=m["unclaim"],     style=discord.ButtonStyle.secondary, custom_id="ticket_unclaim",    emoji="<:Exchange:1480047481491427492>", row=0)
         transcript_btn = discord.ui.Button(label=m["transcript"],  style=discord.ButtonStyle.secondary, custom_id="ticket_transcript", emoji="<:Transcript:1480047021707759727>", row=0)
-        finish_btn     = discord.ui.Button(label=m["finish"],      style=discord.ButtonStyle.success,   custom_id="ticket_finish",     emoji="✅",                               row=0)
+        finish_btn     = discord.ui.Button(label=m["finish"],      style=discord.ButtonStyle.secondary, custom_id="ticket_finish",     emoji="<:oui:1480176155989508348>",      row=1)
         ping_btn       = discord.ui.Button(label=m["ping_staff"],  style=discord.ButtonStyle.secondary, emoji="<:Discord:1480047123188944906>", custom_id="ticket_ping_staff",   row=1)
 
         close_btn.callback      = self.close_callback
