@@ -171,7 +171,7 @@ class TicketActionsView(discord.ui.View):
                 e = discord.Embed(
                     title="📋 Ticket fermé",
                     description=f"**Salon :** {interaction.channel.name}\n**Par :** {interaction.user.mention}",
-                    color=discord.Color.red()
+                    color=discord.Color.from_rgb(255, 0, 0)
                 )
                 e.timestamp = discord.utils.utcnow()
                 await lc.send(embed=e)
@@ -187,14 +187,14 @@ class TicketActionsView(discord.ui.View):
         ticket_claimers[interaction.channel.id] = interaction.user.id
         embed = discord.Embed(
             description=f"✅ Ticket pris en charge par {interaction.user.mention}" if self.lang == "fr" else f"✅ Ticket claimed by {interaction.user.mention}",
-            color=discord.Color.green()
+            color=discord.Color.from_rgb(255, 0, 0)
         )
         await interaction.response.send_message(embed=embed)
 
     async def unclaim_callback(self, interaction: discord.Interaction):
         embed = discord.Embed(
             description=f"🔄 Ticket rendu par {interaction.user.mention}" if self.lang == "fr" else f"🔄 Ticket unclaimed by {interaction.user.mention}",
-            color=discord.Color.orange()
+            color=discord.Color.from_rgb(255, 0, 0)
         )
         await interaction.response.send_message(embed=embed)
 
@@ -426,7 +426,7 @@ class PaymentSelect(discord.ui.Select):
         lang_embed = discord.Embed(
             title="🌍 Language / Langue",
             description="Please select your language to continue.\nVeuillez sélectionner votre langue pour continuer.",
-            color=discord.Color.blurple()
+            color=discord.Color.from_rgb(255, 0, 0)
         )
         lang_embed.set_footer(text="Your ticket will be created after selection • Le ticket sera créé après la sélection")
         await interaction.response.edit_message(
@@ -465,7 +465,7 @@ class TicketTypeSelect(discord.ui.Select):
         payment_embed = discord.Embed(
             title="<:Paiement:1480046846658351276> Payment Method",
             description="Please select your preferred payment method to create your ticket:",
-            color=discord.Color.from_rgb(255, 215, 0)
+            color=discord.Color.from_rgb(255, 0, 0)
         )
         payment_embed.set_footer(text="Your ticket will be created after selection")
         await interaction.response.send_message(
@@ -540,7 +540,7 @@ async def create_ticket_channel(interaction: discord.Interaction, ticket_type: s
     embed = discord.Embed(
         title=m["ticket_title"],
         description=m["ticket_desc"],
-        color=discord.Color.red()
+        color=discord.Color.from_rgb(255, 0, 0)
     )
     embed.add_field(name="<:Nitroo:1480046413441273968> Type", value=ticket_type, inline=True)
     embed.add_field(name="<:Paiement:1480046846658351276> Payment", value=payment, inline=True)
@@ -562,7 +562,7 @@ async def create_ticket_channel(interaction: discord.Interaction, ticket_type: s
             log_embed = discord.Embed(
                 title="📋 Ticket ouvert" if lang == "fr" else "📋 Ticket opened",
                 description=f"**Utilisateur :** {user.mention}\n**Type :** {ticket_type}\n**Paiement :** {payment}\n**Langue :** {'Français' if lang == 'fr' else 'English'}\n**Salon :** {channel.mention}",
-                color=discord.Color.green()
+                color=discord.Color.from_rgb(255, 0, 0)
             )
             log_embed.timestamp = discord.utils.utcnow()
             await lc.send(embed=log_embed)
@@ -608,7 +608,7 @@ class SetupView(discord.ui.View):
                 "Select a category below to create a support ticket.\n\n"
                 "Our team will assist you as soon as possible."
             ),
-            color=discord.Color.from_rgb(180, 0, 0)
+            color=discord.Color.from_rgb(255, 0, 0)
         )
         panel_embed.set_image(url="https://i.ibb.co/fdJxKj7c/BANNIERE.png")
         panel_embed.set_footer(text="Please provide detailed information in your ticket")
@@ -628,7 +628,7 @@ async def setup(ctx):
             "**3️⃣** Sélectionne le rôle support\n\n"
             "Puis clique sur **📨 Envoyer le panel ici** pour déployer !"
         ),
-        color=discord.Color.blurple()
+        color=discord.Color.from_rgb(255, 0, 0)
     )
     await ctx.message.delete()
     await ctx.send(embed=embed, view=SetupView())
@@ -671,7 +671,7 @@ class PPLSaveModal(discord.ui.Modal, title="💳 Sauvegarder mon PPL PayPal"):
             embed=discord.Embed(
                 title="✅ PPL sauvegardé !",
                 description="Ton PayPal a bien été enregistré.\nUtilise `*ppl` pour l'afficher.",
-                color=discord.Color.green()
+                color=discord.Color.from_rgb(255, 0, 0)
             ),
             ephemeral=True
         )
@@ -698,7 +698,7 @@ async def pplsave(ctx):
             "📌 Ces informations seront affichées quand tu utiliseras `*ppl`.\n"
             "🔒 Seul toi peut modifier tes données."
         ),
-        color=discord.Color.from_rgb(0, 48, 135)
+        color=discord.Color.from_rgb(255, 0, 0)
     )
     embed.set_thumbnail(url=ctx.author.display_avatar.url)
     embed.set_footer(text="Tes données sont stockées localement sur le bot.")
@@ -719,7 +719,7 @@ async def ppl(ctx):
                 f"{ctx.author.mention}, tu n'as pas encore sauvegardé ton PayPal.\n\n"
                 "Utilise `*pplsave` pour enregistrer ton adresse PayPal."
             ),
-            color=discord.Color.red()
+            color=discord.Color.from_rgb(255, 0, 0)
         )
         embed.set_thumbnail(url=ctx.author.display_avatar.url)
         return await ctx.send(embed=embed, delete_after=10)
@@ -740,7 +740,7 @@ async def ppl(ctx):
 
     embed = discord.Embed(
         title="<:PPL:1480046672162852985> Informations PayPal",
-        color=discord.Color.from_rgb(0, 48, 135)
+        color=discord.Color.from_rgb(255, 0, 0)
     )
     embed.set_author(
         name=ctx.author.display_name,
@@ -781,7 +781,7 @@ async def ppldelete(ctx):
     await ctx.message.delete()
     if uid not in ppl_data:
         return await ctx.send(
-            embed=discord.Embed(description="❌ Aucun PPL à supprimer.", color=discord.Color.red()),
+            embed=discord.Embed(description="❌ Aucun PPL à supprimer.", color=discord.Color.from_rgb(255, 0, 0)),
             delete_after=8
         )
     del ppl_data[uid]
@@ -790,7 +790,7 @@ async def ppldelete(ctx):
         embed=discord.Embed(
             title="🗑️ PPL supprimé",
             description="Ton adresse PayPal a été supprimée avec succès.",
-            color=discord.Color.orange()
+            color=discord.Color.from_rgb(255, 0, 0)
         ),
         delete_after=8
     )
@@ -803,7 +803,7 @@ async def help_cmd(interaction: discord.Interaction):
     embed = discord.Embed(
         title="📋 Liste des commandes",
         description="Toutes les commandes utilisent le préfixe **`*`**",
-        color=discord.Color.from_rgb(0, 48, 135)
+        color=discord.Color.from_rgb(255, 0, 0)
     )
 
     embed.add_field(
@@ -889,7 +889,7 @@ def make_set_role_command(name, config_key, label):
         embed = discord.Embed(
             title="✅ Rôle configuré",
             description=f"**{label}** → {role.mention}",
-            color=discord.Color.green()
+            color=discord.Color.from_rgb(255, 0, 0)
         )
         await ctx.send(embed=embed, delete_after=8)
     _cmd.__name__ = name
@@ -959,7 +959,7 @@ async def vouchsetup(ctx):
     embed = discord.Embed(
         title="⚙️ Vouch Setup",
         description="Select the vouch channel and the role to give after a vouch.",
-        color=discord.Color.red()
+        color=discord.Color.from_rgb(255, 0, 0)
     )
     await ctx.send(embed=embed, view=VouchSetupView())
 
@@ -1124,7 +1124,7 @@ async def end_giveaway(channel_id: int, message_id: int, guild: discord.Guild):
     prize = giveaway["prize"]
     host = giveaway["host"]
     if not participants:
-        embed = discord.Embed(title="🎉 GIVEAWAY ENDED", description=f"**Prize:** {prize}\n**Host:** <@{host}>\n\n😔 No participants!", color=discord.Color.red())
+        embed = discord.Embed(title="🎉 GIVEAWAY ENDED", description=f"**Prize:** {prize}\n**Host:** <@{host}>\n\n😔 No participants!", color=discord.Color.from_rgb(255, 0, 0))
         embed.set_footer(text="Slayzix Shop • Giveaway ended")
         embed.timestamp = discord.utils.utcnow()
         await message.edit(embed=embed, view=None)
@@ -1136,7 +1136,7 @@ async def end_giveaway(channel_id: int, message_id: int, guild: discord.Guild):
     embed = discord.Embed(
         title="🎉 GIVEAWAY ENDED",
         description=f"**Prize:** {prize}\n**Winner(s):** {winners_mentions}\n**Host:** <@{host}>\n**Participants:** {len(participants)}",
-        color=discord.Color.gold()
+        color=discord.Color.from_rgb(255, 0, 0)
     )
     embed.set_footer(text="Slayzix Shop • Giveaway ended")
     embed.timestamp = discord.utils.utcnow()
@@ -1164,7 +1164,7 @@ async def giveaway_cmd(interaction: discord.Interaction, duration: str, winners:
     embed = discord.Embed(
         title="🎉 GIVEAWAY",
         description=f"**Prize:** {prize}\n**Winner(s):** {winners}\n**Host:** {interaction.user.mention}\n**Ends:** <t:{end_timestamp}:R> (<t:{end_timestamp}:f>)\n\nClick 🎉 to participate!",
-        color=discord.Color.red()
+        color=discord.Color.from_rgb(255, 0, 0)
     )
     embed.set_footer(text="Slayzix Shop • Giveaway")
     embed.timestamp = discord.utils.utcnow()
@@ -1231,7 +1231,7 @@ async def say(ctx):
     embed = discord.Embed(
         title="📢 Send a message as the bot",
         description="Select the target channel, then type your message.",
-        color=discord.Color.red()
+        color=discord.Color.from_rgb(255, 0, 0)
     )
     await ctx.send(embed=embed, view=SayView(), delete_after=120)
 
