@@ -80,7 +80,7 @@ TICKET_TYPES = [
 ]
 
 PAYMENT_OPTIONS = [
-    discord.SelectOption(label="PayPal",       emoji="💳",  description="Pay via PayPal",  value="PayPal"),
+    discord.SelectOption(label="PayPal",       emoji="<:PPL:1480046672162852985>",  description="Pay via PayPal",  value="PayPal"),
 ]
 
 LANG_OPTIONS = [
@@ -104,7 +104,7 @@ MESSAGES = {
         "closed_by":      "Ticket fermé par",
         "already_open":   "❌ Tu as déjà un ticket ouvert →",
         "created":        "✅ Ticket créé →",
-        "finish":         "✅ Finish",
+        "finish":         "Finish",
     },
     "en": {
         "ticket_title":   "<:Nitroo:1480046413441273968> New Ticket",
@@ -119,7 +119,7 @@ MESSAGES = {
         "closed_by":      "Ticket closed by",
         "already_open":   "❌ You already have an open ticket →",
         "created":        "✅ Ticket created →",
-        "finish":         "✅ Finish",
+        "finish":         "Finish",
     }
 }
 
