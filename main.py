@@ -1042,16 +1042,21 @@ class LegitView(discord.ui.View):
         if interaction.user.id in self.voters:
             return await interaction.response.send_message("❌ You already voted!", ephemeral=True)
         self.voters.add(interaction.user.id)
-        self.no_count += 1
-        self.children[1].label = str(self.no_count)
-        await interaction.message.edit(view=self)
         if interaction.guild.me.guild_permissions.ban_members:
             try:
-                await interaction.user.ban(reason="Voted No on Legit check")
                 await interaction.response.send_message("🔨 You voted **No** — you have been banned.", ephemeral=True)
+                await interaction.user.ban(reason="Voted No on Legit check")
+                # Vote retiré du compteur car banni
+                self.voters.discard(interaction.user.id)
             except Exception:
+                self.no_count += 1
+                self.children[1].label = str(self.no_count)
+                await interaction.message.edit(view=self)
                 await interaction.response.send_message("✅ You voted **No**!", ephemeral=True)
         else:
+            self.no_count += 1
+            self.children[1].label = str(self.no_count)
+            await interaction.message.edit(view=self)
             await interaction.response.send_message("✅ You voted **No**!", ephemeral=True)
 
 
@@ -1066,7 +1071,7 @@ async def wearelegit(ctx):
         color=discord.Color.from_rgb(255, 0, 0)
     )
     embed.set_image(url="https://i.ibb.co/fdJxKj7c/BANNIERE.png")
-    embed.timestamp = discord.utils.utcnow()
+    embed.set_footer(text="Slayzix Legit ?")
     msg = await ctx.send(embed=embed)
     await msg.edit(view=LegitView(msg.id))
 
