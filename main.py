@@ -830,23 +830,15 @@ async def vouchsetup(ctx):
     )
     await ctx.send(embed=embed, view=VouchSetupView())
 
-@bot.tree.command(name="vouch", description="⭐ Leave a review for the shop")
-@discord.app_commands.describe(
-    rating="Your rating out of 5",
-    staff="The staff member who helped you",
-    service="Service purchased",
-    comment="Your comment"
-)
-@discord.app_commands.choices(rating=[
-    discord.app_commands.Choice(name="⭐ 1/5", value=1),
-    discord.app_commands.Choice(name="⭐⭐ 2/5", value=2),
-    discord.app_commands.Choice(name="⭐⭐⭐ 3/5", value=3),
-    discord.app_commands.Choice(name="⭐⭐⭐⭐ 4/5", value=4),
-    discord.app_commands.Choice(name="⭐⭐⭐⭐⭐ 5/5", value=5),
-])
-async def vouch(interaction: discord.Interaction, rating: int, staff: discord.Member, service: str, comment: str):
+@bot.command(name="vouch")
+async def vouch(ctx, staff: discord.Member, rating: int, service: str, *, comment: str):
+    """Usage: *vouch @staff <note 1-5> <service> <commentaire>"""
+    await ctx.message.delete()
+
+    if rating < 1 or rating > 5:
+        return await ctx.send("❌ Rating must be between 1 and 5.", delete_after=8)
+
     stars = "⭐" * rating + "🌑" * (5 - rating)
-    colors = {1: 0xed4245, 2: 0xe67e22, 3: 0xfee75c, 4: 0x57f287, 5: 0xff0000}
     badges = {1: "😡 Very bad", 2: "😕 Bad", 3: "😐 Average", 4: "😊 Good", 5: "🤩 Excellent!"}
 
     # Incrément du compteur de vouchs du staff
@@ -856,31 +848,29 @@ async def vouch(interaction: discord.Interaction, rating: int, staff: discord.Me
     save_vouches(vouch_counts)
 
     embed = discord.Embed(title="📝 New Review — Slayzix Shop", color=discord.Color.from_rgb(255, 0, 0))
-    embed.add_field(name="👤 Customer", value=interaction.user.mention, inline=True)
+    embed.add_field(name="👤 Customer", value=ctx.author.mention, inline=True)
     embed.add_field(name="🛠️ Staff", value=staff.mention, inline=True)
     embed.add_field(name="📦 Service", value=f"**{service}**", inline=True)
     embed.add_field(name="⭐ Rating", value=f"{stars}  `{rating}/5` — {badges[rating]}", inline=False)
     embed.add_field(name="💬 Comment", value=f"*{comment}*", inline=False)
     embed.add_field(name="🏆 Staff Vouches", value=f"`{staff_total}` vouch(s) total", inline=False)
-    embed.set_thumbnail(url=interaction.user.display_avatar.url)
+    embed.set_thumbnail(url=ctx.author.display_avatar.url)
     embed.set_footer(text="Slayzix Shop • Thank you for your review!")
     embed.timestamp = discord.utils.utcnow()
 
     # Attribution automatique du rôle "+X vouch" au staff
-    # Cherche si le rôle existe déjà, sinon le crée
     new_role_name = f"+{staff_total} vouch"
-    existing_role = discord.utils.get(interaction.guild.roles, name=new_role_name)
+    existing_role = discord.utils.get(ctx.guild.roles, name=new_role_name)
     if not existing_role:
         try:
-            existing_role = await interaction.guild.create_role(
+            existing_role = await ctx.guild.create_role(
                 name=new_role_name,
                 color=discord.Color.from_rgb(255, 0, 0),
                 reason=f"Vouch auto-role: {staff_total} vouches"
             )
-            # Positionne le rôle juste en dessous du rôle admin le plus bas
             admin_roles = [
-                r for r in interaction.guild.roles
-                if r.permissions.administrator and r != interaction.guild.default_role
+                r for r in ctx.guild.roles
+                if r.permissions.administrator and r != ctx.guild.default_role
             ]
             if admin_roles:
                 lowest_admin = min(admin_roles, key=lambda r: r.position)
@@ -891,10 +881,10 @@ async def vouch(interaction: discord.Interaction, rating: int, staff: discord.Me
         except discord.Forbidden:
             existing_role = None
 
-    # Retire l'ancien rôle vouch du staff (le précédent)
+    # Retire l'ancien rôle vouch du staff
     if staff_total > 1:
         old_role_name = f"+{staff_total - 1} vouch"
-        old_role = discord.utils.get(interaction.guild.roles, name=old_role_name)
+        old_role = discord.utils.get(ctx.guild.roles, name=old_role_name)
         if old_role and old_role in staff.roles:
             try:
                 await staff.remove_roles(old_role, reason="Vouch role upgrade")
@@ -910,22 +900,22 @@ async def vouch(interaction: discord.Interaction, rating: int, staff: discord.Me
 
     # Rôle de base au customer
     if vouch_config["role"]:
-        base_role = interaction.guild.get_role(vouch_config["role"])
-        if base_role and base_role not in interaction.user.roles:
+        base_role = ctx.guild.get_role(vouch_config["role"])
+        if base_role and base_role not in ctx.author.roles:
             try:
-                await interaction.user.add_roles(base_role, reason="Vouch submitted")
+                await ctx.author.add_roles(base_role, reason="Vouch submitted")
             except discord.Forbidden:
                 pass
 
     if vouch_config["channel"]:
-        ch = interaction.guild.get_channel(vouch_config["channel"])
+        ch = ctx.guild.get_channel(vouch_config["channel"])
         if ch:
             await ch.send(embed=embed)
-            return await interaction.response.send_message(
-                f"✅ Review posted in {ch.mention}! Thank you 🙏\n🏆 {staff.display_name} now has **{staff_total}** vouch(s) → role **+{staff_total} vouch** given!",
-                ephemeral=True
+            return await ctx.send(
+                f"✅ Review posted in {ch.mention}! 🙏 {staff.display_name} now has **{staff_total}** vouch(s)!",
+                delete_after=8
             )
-    await interaction.response.send_message(embed=embed)
+    await ctx.send(embed=embed)
 
 
 @bot.command(name="setvouchrole")
