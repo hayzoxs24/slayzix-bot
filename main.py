@@ -95,11 +95,11 @@ MESSAGES = {
         "ticket_title":   "<:Nitroo:1480046413441273968> Nouveau Ticket",
         "ticket_desc":    "Le support sera avec vous rapidement.\n\nPour fermer ce ticket, appuyez sur le bouton Fermer.",
         "ping_staff_tip": "🔔 Utilisez **Ping Staff** si aucune réponse après 15 min (cooldown 15 min)",
-        "close":          "🔴 Fermer",
-        "claim":          "🟢 Prendre en charge",
-        "unclaim":        "🔴 Rendre",
-        "transcript":     "📄 Transcript",
-        "ping_staff":     "🔔 Ping Staff",
+        "close":          "Fermer",
+        "claim":          "Prendre en charge",
+        "unclaim":        "Rendre",
+        "transcript":     "Transcript",
+        "ping_staff":     "Ping Staff",
         "closing":        "🔒 Fermeture du ticket dans 5 secondes...",
         "closed_by":      "Ticket fermé par",
         "already_open":   "❌ Tu as déjà un ticket ouvert →",
@@ -109,11 +109,11 @@ MESSAGES = {
         "ticket_title":   "<:Nitroo:1480046413441273968> New Ticket",
         "ticket_desc":    "Support will be with you shortly.\n\nTo close this ticket, press the close button below.",
         "ping_staff_tip": "🔔 Use **Ping Staff** if no response after 15 min (15 min cooldown)",
-        "close":          "🔴 Close",
-        "claim":          "🟢 Claim",
-        "unclaim":        "🔴 Unclaim",
-        "transcript":     "📄 Transcript",
-        "ping_staff":     "🔔 Ping Staff",
+        "close":          "Close",
+        "claim":          "Claim",
+        "unclaim":        "Unclaim",
+        "transcript":     "Transcript",
+        "ping_staff":     "Ping Staff",
         "closing":        "🔒 Closing ticket in 5 seconds...",
         "closed_by":      "Ticket closed by",
         "already_open":   "❌ You already have an open ticket →",
@@ -134,11 +134,12 @@ class TicketActionsView(discord.ui.View):
     def __init__(self, lang: str, ticket_type: str, payment: str):
         super().__init__(timeout=None)
         self.lang = lang
+        self.ticket_type = ticket_type
         m = MESSAGES[lang]
         # On crée les boutons dynamiquement pour avoir les bons labels
         close_btn = discord.ui.Button(label=m["close"], style=discord.ButtonStyle.danger, custom_id="ticket_close", emoji="<:Other:1480047561615085638>", row=0)
         claim_btn = discord.ui.Button(label=m["claim"], style=discord.ButtonStyle.success, custom_id="ticket_claim", emoji="<:Boost:1480046746146050149>", row=0)
-        unclaim_btn = discord.ui.Button(label=m["unclaim"], style=discord.ButtonStyle.secondary, custom_id="ticket_unclaim", emoji="<:Other:1480047561615085638>", row=0)
+        unclaim_btn = discord.ui.Button(label=m["unclaim"], style=discord.ButtonStyle.secondary, custom_id="ticket_unclaim", emoji="<:Exchange:1480047481491427492>", row=0)
         transcript_btn = discord.ui.Button(label=m["transcript"], style=discord.ButtonStyle.primary, custom_id="ticket_transcript", emoji="<:Transcript:1480047021707759727>", row=0)
         ping_btn = discord.ui.Button(label=m["ping_staff"], style=discord.ButtonStyle.secondary, emoji="<:Discord:1480047123188944906>", custom_id="ticket_ping_staff", row=1)
 
@@ -218,10 +219,31 @@ class TicketActionsView(discord.ui.View):
             msg = f"⏳ Cooldown actif ! Réessaie dans **{remaining // 60}m {remaining % 60}s**." if self.lang == "fr" else f"⏳ Cooldown active! Try again in **{remaining // 60}m {remaining % 60}s**."
             return await interaction.response.send_message(msg, ephemeral=True)
         ping_staff_cooldown[interaction.channel.id] = now
-        role = interaction.guild.get_role(ticket_config["support_role"]) if ticket_config["support_role"] else None
-        if role:
+
+        # Détermine le rôle à pinger selon le type de ticket
+        type_role_map = {
+            "Nitro": "role_nitro",
+            "Server Boost": "role_boost",
+            "Decoration": "role_decoration",
+            "Exchange": "role_exchange",
+            "Other": "role_other",
+        }
+        mentions = []
+        # Rôle support général
+        if ticket_config["support_role"]:
+            role = interaction.guild.get_role(ticket_config["support_role"])
+            if role:
+                mentions.append(role.mention)
+        # Rôle spécifique au type
+        type_key = type_role_map.get(self.ticket_type)
+        if type_key and ticket_config.get(type_key):
+            type_role = interaction.guild.get_role(ticket_config[type_key])
+            if type_role and type_role.mention not in mentions:
+                mentions.append(type_role.mention)
+
+        if mentions:
             await interaction.channel.send(
-                f"🔔 {role.mention} — " + ("Un client attend de l'aide !" if self.lang == "fr" else "A customer needs help!"),
+                " ".join(mentions) + " — " + ("Un client attend de l'aide !" if self.lang == "fr" else "A customer needs help!"),
                 allowed_mentions=discord.AllowedMentions(roles=True)
             )
         await interaction.response.send_message("✅ Staff pingé !" if self.lang == "fr" else "✅ Staff pinged!", ephemeral=True)
@@ -677,6 +699,33 @@ async def help_cmd(interaction: discord.Interaction):
     )
 
     embed.add_field(
+        name="🎉 __Giveaway__",
+        value=(
+            "`/giveaway` — Start a giveaway\n"
+            "`/giveawayend` — End a giveaway manually\n"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="⭐ __Vouch__",
+        value=(
+            "`/vouch` — Leave a review\n"
+            "`*vouchsetup` — *(Admin)* Configure vouch channel & role\n"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="📢 __Divers__",
+        value=(
+            "`*say` — Send a message as the bot\n"
+            "`*wearelegit` — *(Admin)* Post the legit vote panel\n"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
         name="ℹ️ __Infos__",
         value=(
             "• Les commandes `*` suppriment ton message automatiquement\n"
@@ -720,6 +769,307 @@ setdeco     = make_set_role_command("setdeco",       "role_decoration", "<:Disco
 setexchange = make_set_role_command("setexchange",   "role_exchange",   "<:Exchange:1480047481491427492> Rôle Exchange")
 setother    = make_set_role_command("setother",      "role_other",      "<:Other:1480047561615085638> Rôle Other")
 
+
+# ================= VOUCH =================
+
+vouch_config = {
+    "channel": None,
+    "role": None,
+}
+
+class SetVouchChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self):
+        super().__init__(placeholder="Select vouch channel", channel_types=[discord.ChannelType.text])
+    async def callback(self, interaction: discord.Interaction):
+        vouch_config["channel"] = self.values[0].id
+        await interaction.response.send_message(f"✅ Vouch channel: {self.values[0].mention}", ephemeral=True)
+
+class SetVouchRoleSelect(discord.ui.RoleSelect):
+    def __init__(self):
+        super().__init__(placeholder="Select vouch role (given after vouch)")
+    async def callback(self, interaction: discord.Interaction):
+        vouch_config["role"] = self.values[0].id
+        await interaction.response.send_message(f"✅ Vouch role: {self.values[0].mention}", ephemeral=True)
+
+class VouchSetupView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(SetVouchChannelSelect())
+        self.add_item(SetVouchRoleSelect())
+
+@bot.command(name="vouchsetup")
+@commands.has_permissions(administrator=True)
+async def vouchsetup(ctx):
+    await ctx.message.delete()
+    embed = discord.Embed(
+        title="⚙️ Vouch Setup",
+        description="Select the vouch channel and the role to give after a vouch.",
+        color=discord.Color.red()
+    )
+    await ctx.send(embed=embed, view=VouchSetupView())
+
+@bot.tree.command(name="vouch", description="⭐ Leave a review for the shop")
+@discord.app_commands.describe(
+    rating="Your rating out of 5",
+    service="Service purchased",
+    comment="Your comment"
+)
+@discord.app_commands.choices(rating=[
+    discord.app_commands.Choice(name="⭐ 1/5", value=1),
+    discord.app_commands.Choice(name="⭐⭐ 2/5", value=2),
+    discord.app_commands.Choice(name="⭐⭐⭐ 3/5", value=3),
+    discord.app_commands.Choice(name="⭐⭐⭐⭐ 4/5", value=4),
+    discord.app_commands.Choice(name="⭐⭐⭐⭐⭐ 5/5", value=5),
+])
+async def vouch(interaction: discord.Interaction, rating: int, service: str, comment: str):
+    stars = "⭐" * rating + "🌑" * (5 - rating)
+    colors = {1: 0xed4245, 2: 0xe67e22, 3: 0xfee75c, 4: 0x57f287, 5: 0xff0000}
+    badges = {1: "😡 Very bad", 2: "😕 Bad", 3: "😐 Average", 4: "😊 Good", 5: "🤩 Excellent!"}
+    embed = discord.Embed(title="📝 New Review — Slayzix Shop", color=colors[rating])
+    embed.add_field(name="👤 Customer", value=interaction.user.mention, inline=True)
+    embed.add_field(name="📦 Service", value=f"**{service}**", inline=True)
+    embed.add_field(name="⭐ Rating", value=f"{stars}  `{rating}/5` — {badges[rating]}", inline=False)
+    embed.add_field(name="💬 Comment", value=f"*{comment}*", inline=False)
+    embed.set_thumbnail(url=interaction.user.display_avatar.url)
+    embed.set_footer(text="Slayzix Shop • Thank you for your review!")
+    embed.timestamp = discord.utils.utcnow()
+
+    role_added = False
+    role = None
+    if vouch_config["role"]:
+        role = interaction.guild.get_role(vouch_config["role"])
+        if role and role not in interaction.user.roles:
+            try:
+                await interaction.user.add_roles(role, reason="Vouch submitted")
+                role_added = True
+            except discord.Forbidden:
+                pass
+
+    if vouch_config["channel"]:
+        ch = interaction.guild.get_channel(vouch_config["channel"])
+        if ch:
+            await ch.send(embed=embed)
+            msg = f"✅ Review posted in {ch.mention}, thank you! 🙏"
+            if role_added:
+                msg += f"\n🎖️ Role **{role.name}** given!"
+            return await interaction.response.send_message(msg, ephemeral=True)
+    await interaction.response.send_message(embed=embed)
+
+
+# ================= GIVEAWAY =================
+
+active_giveaways = {}
+
+class GiveawayView(discord.ui.View):
+    def __init__(self, giveaway_id: int):
+        super().__init__(timeout=None)
+        self.giveaway_id = giveaway_id
+
+    @discord.ui.button(label="🎉 Participate", style=discord.ButtonStyle.success, custom_id="giveaway_join")
+    async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.giveaway_id not in active_giveaways:
+            return await interaction.response.send_message("❌ This giveaway has ended.", ephemeral=True)
+        giveaway = active_giveaways[self.giveaway_id]
+        if interaction.user.id in giveaway["participants"]:
+            giveaway["participants"].discard(interaction.user.id)
+            button.label = f"🎉 Participate — {len(giveaway['participants'])}"
+            await interaction.message.edit(view=self)
+            return await interaction.response.send_message("❌ You withdrew from the giveaway.", ephemeral=True)
+        giveaway["participants"].add(interaction.user.id)
+        button.label = f"🎉 Participate — {len(giveaway['participants'])}"
+        await interaction.message.edit(view=self)
+        await interaction.response.send_message("✅ You joined! Good luck 🍀", ephemeral=True)
+
+
+async def end_giveaway(channel_id: int, message_id: int, guild: discord.Guild):
+    import random
+    await asyncio.sleep(0.1)
+    if message_id not in active_giveaways:
+        return
+    giveaway = active_giveaways[message_id]
+    channel = guild.get_channel(channel_id)
+    if not channel:
+        return
+    try:
+        message = await channel.fetch_message(message_id)
+    except Exception:
+        return
+    participants = list(giveaway["participants"])
+    prize = giveaway["prize"]
+    host = giveaway["host"]
+    if not participants:
+        embed = discord.Embed(title="🎉 GIVEAWAY ENDED", description=f"**Prize:** {prize}\n**Host:** <@{host}>\n\n😔 No participants!", color=discord.Color.red())
+        embed.set_footer(text="Slayzix Shop • Giveaway ended")
+        embed.timestamp = discord.utils.utcnow()
+        await message.edit(embed=embed, view=None)
+        await channel.send("😔 No participants, no winner!")
+        del active_giveaways[message_id]
+        return
+    winners = random.sample(participants, min(giveaway["winners"], len(participants)))
+    winners_mentions = " ".join([f"<@{w}>" for w in winners])
+    embed = discord.Embed(
+        title="🎉 GIVEAWAY ENDED",
+        description=f"**Prize:** {prize}\n**Winner(s):** {winners_mentions}\n**Host:** <@{host}>\n**Participants:** {len(participants)}",
+        color=discord.Color.gold()
+    )
+    embed.set_footer(text="Slayzix Shop • Giveaway ended")
+    embed.timestamp = discord.utils.utcnow()
+    await message.edit(embed=embed, view=None)
+    await channel.send(f"🎊 Congratulations {winners_mentions}! You won **{prize}**!\nContact <@{host}> to claim your prize.")
+    del active_giveaways[message_id]
+
+
+@bot.tree.command(name="giveaway", description="🎉 Start a giveaway!")
+@discord.app_commands.describe(duration="Duration (e.g. 10s, 5m, 1h, 2d)", winners="Number of winners", prize="What you are giving away")
+@discord.app_commands.checks.has_permissions(manage_guild=True)
+async def giveaway_cmd(interaction: discord.Interaction, duration: str, winners: int, prize: str):
+    try:
+        unit = duration[-1].lower()
+        value = int(duration[:-1])
+        multipliers = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+        if unit not in multipliers:
+            raise ValueError
+        seconds = value * multipliers[unit]
+    except Exception:
+        return await interaction.response.send_message("❌ Invalid format. Ex: `30s`, `5m`, `1h`, `2d`", ephemeral=True)
+    if winners < 1:
+        return await interaction.response.send_message("❌ Minimum 1 winner.", ephemeral=True)
+    end_timestamp = int((datetime.utcnow() + __import__("datetime").timedelta(seconds=seconds)).timestamp())
+    embed = discord.Embed(
+        title="🎉 GIVEAWAY",
+        description=f"**Prize:** {prize}\n**Winner(s):** {winners}\n**Host:** {interaction.user.mention}\n**Ends:** <t:{end_timestamp}:R> (<t:{end_timestamp}:f>)\n\nClick 🎉 to participate!",
+        color=discord.Color.red()
+    )
+    embed.set_footer(text="Slayzix Shop • Giveaway")
+    embed.timestamp = discord.utils.utcnow()
+    await interaction.response.send_message("✅ Giveaway started!", ephemeral=True)
+    msg = await interaction.channel.send(embed=embed)
+    active_giveaways[msg.id] = {"prize": prize, "winners": winners, "host": interaction.user.id, "participants": set(), "channel_id": interaction.channel.id}
+    await msg.edit(view=GiveawayView(msg.id))
+    await asyncio.sleep(seconds)
+    await end_giveaway(interaction.channel.id, msg.id, interaction.guild)
+
+
+@bot.tree.command(name="giveawayend", description="⏹️ End a giveaway manually")
+@discord.app_commands.describe(message_id="The giveaway message ID")
+@discord.app_commands.checks.has_permissions(manage_guild=True)
+async def giveawayend(interaction: discord.Interaction, message_id: str):
+    msg_id = int(message_id)
+    if msg_id not in active_giveaways:
+        return await interaction.response.send_message("❌ Giveaway not found or already ended.", ephemeral=True)
+    await interaction.response.send_message("✅ Giveaway ended manually!", ephemeral=True)
+    await end_giveaway(interaction.channel.id, msg_id, interaction.guild)
+
+
+# ================= SAY =================
+
+class SayModal(discord.ui.Modal, title="📢 Send a message as the bot"):
+    message_content = discord.ui.TextInput(
+        label="Message",
+        placeholder="Type your message here...",
+        style=discord.TextStyle.long,
+        max_length=2000,
+        required=True
+    )
+
+    def __init__(self, target_channel):
+        super().__init__()
+        self.target_channel = target_channel
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await self.target_channel.send(self.message_content.value)
+        await interaction.response.send_message(f"✅ Message sent in {self.target_channel.mention}!", ephemeral=True)
+
+
+class SayChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self):
+        super().__init__(placeholder="Select the target channel...", channel_types=[discord.ChannelType.text], row=0)
+
+    async def callback(self, interaction: discord.Interaction):
+        target = self.values[0]
+        channel = interaction.guild.get_channel(target.id)
+        await interaction.response.send_modal(SayModal(channel))
+
+
+class SayView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=120)
+        self.add_item(SayChannelSelect())
+
+
+@bot.command(name="say")
+@commands.has_permissions(manage_messages=True)
+async def say(ctx):
+    """Ouvre un panel pour envoyer un message avec le bot."""
+    await ctx.message.delete()
+    embed = discord.Embed(
+        title="📢 Send a message as the bot",
+        description="Select the target channel, then type your message.",
+        color=discord.Color.red()
+    )
+    await ctx.send(embed=embed, view=SayView(), delete_after=120)
+
+
+# ================= WE ARE LEGIT =================
+
+class LegitView(discord.ui.View):
+    def __init__(self, msg_id: int):
+        super().__init__(timeout=None)
+        self.msg_id = msg_id
+        self.yes_count = 0
+        self.no_count = 0
+        self.voters = set()
+
+        yes_btn = discord.ui.Button(label=str(self.yes_count), style=discord.ButtonStyle.danger, emoji="<:oui:1480176155989508348>", custom_id=f"legit_yes_{msg_id}", row=0)
+        no_btn  = discord.ui.Button(label=str(self.no_count),  style=discord.ButtonStyle.danger, emoji="<:non:1480176175589621821>", custom_id=f"legit_no_{msg_id}",  row=0)
+
+        yes_btn.callback = self.yes_callback
+        no_btn.callback  = self.no_callback
+
+        self.add_item(yes_btn)
+        self.add_item(no_btn)
+
+    async def yes_callback(self, interaction: discord.Interaction):
+        if interaction.user.id in self.voters:
+            return await interaction.response.send_message("❌ You already voted!", ephemeral=True)
+        self.voters.add(interaction.user.id)
+        self.yes_count += 1
+        self.children[0].label = str(self.yes_count)
+        await interaction.message.edit(view=self)
+        await interaction.response.send_message("✅ You voted **Yes**!", ephemeral=True)
+
+    async def no_callback(self, interaction: discord.Interaction):
+        if interaction.user.id in self.voters:
+            return await interaction.response.send_message("❌ You already voted!", ephemeral=True)
+        self.voters.add(interaction.user.id)
+        self.no_count += 1
+        self.children[1].label = str(self.no_count)
+        await interaction.message.edit(view=self)
+        if interaction.guild.me.guild_permissions.ban_members:
+            try:
+                await interaction.user.ban(reason="Voted No on Legit check")
+                await interaction.response.send_message("🔨 You voted **No** — you have been banned.", ephemeral=True)
+            except Exception:
+                await interaction.response.send_message("✅ You voted **No**!", ephemeral=True)
+        else:
+            await interaction.response.send_message("✅ You voted **No**!", ephemeral=True)
+
+
+@bot.command(name="wearelegit")
+@commands.has_permissions(administrator=True)
+async def wearelegit(ctx):
+    """Envoie le panel We Are Legit avec vote oui/non."""
+    await ctx.message.delete()
+    embed = discord.Embed(
+        title="Slayzix Shop Legit? 🙏",
+        description="<:oui:1480176155989508348> = Yes\n<:non:1480176175589621821> No = **Ban**",
+        color=discord.Color.red()
+    )
+    embed.set_image(url="https://i.ibb.co/ksvCtjxC/a.png")
+    embed.timestamp = discord.utils.utcnow()
+    msg = await ctx.send(embed=embed)
+    await msg.edit(view=LegitView(msg.id))
+
 # ================= ON READY =================
 
 @bot.event
@@ -731,6 +1081,10 @@ async def on_ready():
     print("🌍 FR / EN Lang : OK")
     print("💳 PPL System   : OK")
     print("📋 /help        : OK")
+    print("⭐ Vouch         : OK")
+    print("🎉 Giveaway      : OK")
+    print("📢 Say           : OK")
+    print("🙏 WeAreLegit    : OK")
 
 
 # ================= START =================
