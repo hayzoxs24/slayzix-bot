@@ -250,7 +250,7 @@ class PaymentSelect(discord.ui.Select):
 
     def __init__(self, ticket_type: str, user_id: int):
         super().__init__(
-            placeholder="💳 Select your payment method...",
+            placeholder="Select your payment method...",
             min_values=1, max_values=1,
             options=PAYMENT_OPTIONS,
             custom_id="payment_select"
@@ -283,7 +283,7 @@ class TicketTypeSelect(discord.ui.Select):
 
     def __init__(self):
         super().__init__(
-            placeholder="🎫 Select a category...",
+            placeholder="Select a category...",
             min_values=1, max_values=1,
             options=TICKET_TYPES,
             custom_id="ticket_type_select"
@@ -300,7 +300,7 @@ class TicketTypeSelect(discord.ui.Select):
 
         ticket_type = self.values[0]
         payment_embed = discord.Embed(
-            title="💳 Payment Method",
+            title="<:Paiement:1480046846658351276> Payment Method",
             description="Please select your preferred payment method to create your ticket:",
             color=discord.Color.from_rgb(255, 215, 0)
         )
@@ -425,7 +425,7 @@ class SetupView(discord.ui.View):
     @discord.ui.button(label="📨 Envoyer le panel ici", style=discord.ButtonStyle.success, row=2)
     async def send_panel(self, interaction: discord.Interaction, button: discord.ui.Button):
         panel_embed = discord.Embed(
-            title="🎫 Support Ticket System",
+            title="<:Nitroo:1480046413441273968> Support Ticket System",
             description=(
                 "Select a category below to create a support ticket.\n\n"
                 "Our team will assist you as soon as possible."
