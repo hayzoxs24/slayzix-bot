@@ -64,7 +64,7 @@ ppl_data: dict = load_ppl()  # { "user_id": { "email": str, "nom": str, "note": 
 # ================= TICKET TYPES =================
 
 TICKET_TYPES = [
-    discord.SelectOption(label="Nitro",        emoji="<:nitro:1234567890>", description="Discord Nitro",      value="Nitro"),
+    discord.SelectOption(label="Nitro",        emoji="💎", description="Discord Nitro",      value="Nitro"),
     discord.SelectOption(label="Server Boost", emoji="🚀",                  description="Server Boost",        value="Server Boost"),
     discord.SelectOption(label="Decoration",   emoji="🎨",                  description="Profile Decoration",  value="Decoration"),
     discord.SelectOption(label="Exchange",     emoji="🔄",                  description="Trade / Exchange",    value="Exchange"),
