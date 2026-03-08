@@ -861,6 +861,17 @@ async def vouch(interaction: discord.Interaction, rating: int, staff: discord.Me
                 color=discord.Color.from_rgb(255, 0, 0),
                 reason=f"Vouch auto-role: {staff_total} vouches"
             )
+            # Positionne le rôle juste en dessous du rôle admin le plus bas
+            admin_roles = [
+                r for r in interaction.guild.roles
+                if r.permissions.administrator and r != interaction.guild.default_role
+            ]
+            if admin_roles:
+                lowest_admin = min(admin_roles, key=lambda r: r.position)
+                try:
+                    await existing_role.edit(position=max(1, lowest_admin.position - 1))
+                except Exception:
+                    pass
         except discord.Forbidden:
             existing_role = None
 
