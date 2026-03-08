@@ -677,5 +677,8 @@ async def on_ready():
 # ================= START =================
 
 if __name__ == "__main__":
-    TOKEN = "VOTRE_TOKEN_ICI"
+    import os
+    TOKEN = os.environ.get("TOKEN")
+    if not TOKEN:
+        raise ValueError("❌ TOKEN introuvable ! Ajoute la variable d'environnement TOKEN sur Railway.")
     bot.run(TOKEN)
