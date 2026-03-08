@@ -1,1241 +1,681 @@
 import discord
 from discord.ext import commands
-import os
 import asyncio
-import random
-from datetime import datetime, timedelta
-import aiohttp
-import re
-import yt_dlp
+import json
+import os
+from datetime import datetime
+
+# ================= INTENTS & BOT =================
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ================= CONFIG =================
 
-vouch_channel_id = None
-vouch_role_id = None
-welcome_channel_id = None
-goodbye_channel_id = None
-autoping_channel_id = None
-autodiscret_channel_id = None
-
 ticket_config = {
     "category": None,
     "log_channel": None,
     "support_role": None,
-    "welcome_message": "Bienvenue ! Un membre du staff va vous répondre rapidement.",
+    "nitro_ping_role": None,  # Rôle à ping pour les tickets Nitro
 }
 
-open_tickets = {}
-active_giveaways = {}
-embed_sessions = {}
+open_tickets = {}  # user_id -> channel_id
 
-# ================= MUSIC CONFIG =================
+# ================= PPL STORAGE =================
 
-YDL_OPTIONS = {
-    "format": "bestaudio/best",
-    "noplaylist": True,
-    "quiet": True,
-    "default_search": "ytsearch",
-    "source_address": "0.0.0.0",
-}
+PPL_FILE = "ppl_data.json"
 
-FFMPEG_OPTIONS = {
-    "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
-    "options": "-vn",
-}
-
-music_queues: dict = {}
-
-
-def get_music_queue(guild_id: int) -> list:
-    if guild_id not in music_queues:
-        music_queues[guild_id] = []
-    return music_queues[guild_id]
-
-
-def play_next(ctx_or_interaction, guild, voice_client):
-    queue = get_music_queue(guild.id)
-    if queue:
-        song = queue.pop(0)
-        source = discord.FFmpegPCMAudio(song["url"], **FFMPEG_OPTIONS)
-        voice_client.play(
-            source,
-            after=lambda e: play_next(ctx_or_interaction, guild, voice_client) if not e else print(f"Erreur lecture : {e}"),
-        )
-        asyncio.run_coroutine_threadsafe(
-            ctx_or_interaction.channel.send(f"🎵 En lecture : **{song['title']}**"), bot.loop
-        )
-    else:
-        asyncio.run_coroutine_threadsafe(
-            ctx_or_interaction.channel.send("✅ File d'attente vide. Déconnexion dans 60 s…"), bot.loop
-        )
-        asyncio.run_coroutine_threadsafe(
-            _disconnect_after(voice_client, 60), bot.loop
-        )
-
-
-async def _disconnect_after(voice_client, delay: int):
-    await asyncio.sleep(delay)
-    if voice_client and voice_client.is_connected() and not voice_client.is_playing():
-        await voice_client.disconnect()
-
-
-# ================= MUSIC COMMANDS =================
-
-@bot.tree.command(name="play", description="🎵 Joue une chanson ou l'ajoute à la file d'attente")
-@discord.app_commands.describe(recherche="Titre, artiste ou URL YouTube")
-async def play(interaction: discord.Interaction, recherche: str):
-    if not interaction.user.voice:
-        return await interaction.response.send_message("❌ Tu dois être dans un salon vocal !", ephemeral=True)
-
-    channel = interaction.user.voice.channel
-    vc = interaction.guild.voice_client
-
-    if vc is None:
-        vc = await channel.connect()
-    elif vc.channel != channel:
-        await vc.move_to(channel)
-
-    await interaction.response.defer()
-
-    with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
+def load_ppl() -> dict:
+    if os.path.exists(PPL_FILE):
         try:
-            info = ydl.extract_info(recherche, download=False)
-            if "entries" in info:
-                info = info["entries"][0]
-            song = {"title": info["title"], "url": info["url"]}
-        except Exception as e:
-            return await interaction.followup.send(f"❌ Impossible de trouver la chanson : `{e}`")
+            with open(PPL_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
 
-    queue = get_music_queue(interaction.guild.id)
+def save_ppl(data: dict):
+    with open(PPL_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
-    if vc.is_playing() or vc.is_paused():
-        queue.append(song)
-        embed = discord.Embed(
-            title="➕ Ajouté à la file",
-            description=f"**{song['title']}**\nPosition dans la file : `{len(queue)}`",
-            color=discord.Color.blurple()
-        )
-        embed.set_footer(text="Slayzix Shop • Music")
-        await interaction.followup.send(embed=embed)
-    else:
-        queue.insert(0, song)
-        play_next(interaction, interaction.guild, vc)
-        embed = discord.Embed(
-            title="🎵 En lecture",
-            description=f"**{song['title']}**",
-            color=discord.Color.green()
-        )
-        embed.set_footer(text="Slayzix Shop • Music")
-        await interaction.followup.send(embed=embed)
+ppl_data: dict = load_ppl()  # { "user_id": { "email": str, "nom": str, "note": str } }
 
+# ================= PPL STORAGE =================
 
-@bot.tree.command(name="skip", description="⏭️ Passe à la chanson suivante")
-async def skip(interaction: discord.Interaction):
-    vc = interaction.guild.voice_client
-    if vc and vc.is_playing():
-        vc.stop()
-        await interaction.response.send_message(embed=discord.Embed(
-            title="⏭️ Chanson passée !",
-            color=discord.Color.blurple()
-        ))
-    else:
-        await interaction.response.send_message("❌ Aucune musique en cours.", ephemeral=True)
+PPL_FILE = "ppl_data.json"
 
+def load_ppl() -> dict:
+    """Charge les données PPL depuis le fichier JSON."""
+    if os.path.exists(PPL_FILE):
+        try:
+            with open(PPL_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
 
-@bot.tree.command(name="pause", description="⏸️ Met en pause la lecture")
-async def pause(interaction: discord.Interaction):
-    vc = interaction.guild.voice_client
-    if vc and vc.is_playing():
-        vc.pause()
-        await interaction.response.send_message(embed=discord.Embed(
-            title="⏸️ Lecture en pause",
-            color=discord.Color.orange()
-        ))
-    else:
-        await interaction.response.send_message("❌ Aucune musique en cours.", ephemeral=True)
+def save_ppl(data: dict):
+    """Sauvegarde les données PPL dans le fichier JSON."""
+    with open(PPL_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
+ppl_data: dict = load_ppl()  # { "user_id": { "email": str, "nom": str, "note": str } }
 
-@bot.tree.command(name="resume", description="▶️ Reprend la lecture")
-async def resume(interaction: discord.Interaction):
-    vc = interaction.guild.voice_client
-    if vc and vc.is_paused():
-        vc.resume()
-        await interaction.response.send_message(embed=discord.Embed(
-            title="▶️ Lecture reprise !",
-            color=discord.Color.green()
-        ))
-    else:
-        await interaction.response.send_message("❌ La lecture n'est pas en pause.", ephemeral=True)
+# ================= TICKET TYPES =================
 
+TICKET_TYPES = [
+    discord.SelectOption(label="Nitro",        emoji="<:nitro:1234567890>", description="Discord Nitro",      value="Nitro"),
+    discord.SelectOption(label="Server Boost", emoji="🚀",                  description="Server Boost",        value="Server Boost"),
+    discord.SelectOption(label="Decoration",   emoji="🎨",                  description="Profile Decoration",  value="Decoration"),
+    discord.SelectOption(label="Exchange",     emoji="🔄",                  description="Trade / Exchange",    value="Exchange"),
+    discord.SelectOption(label="Other",        emoji="📌",                  description="Other request",       value="Other"),
+]
 
-@bot.tree.command(name="stop", description="⏹️ Arrête la musique et déconnecte le bot")
-async def stop(interaction: discord.Interaction):
-    get_music_queue(interaction.guild.id).clear()
-    vc = interaction.guild.voice_client
-    if vc:
-        vc.stop()
-        await vc.disconnect()
-    await interaction.response.send_message(embed=discord.Embed(
-        title="⏹️ Musique arrêtée",
-        description="File d'attente vidée et bot déconnecté.",
-        color=discord.Color.red()
-    ))
+PAYMENT_OPTIONS = [
+    discord.SelectOption(label="PayPal",       emoji="💳",  description="Pay via PayPal",  value="PayPal"),
+]
 
+LANG_OPTIONS = [
+    discord.SelectOption(label="Français",     emoji="🇫🇷",  description="Continuer en français", value="fr"),
+    discord.SelectOption(label="English",      emoji="🇬🇧",  description="Continue in English",   value="en"),
+]
 
-@bot.tree.command(name="queue", description="📋 Affiche la file d'attente musicale")
-async def queue_music(interaction: discord.Interaction):
-    queue = get_music_queue(interaction.guild.id)
-    if not queue:
-        return await interaction.response.send_message(embed=discord.Embed(
-            title="📭 File d'attente vide",
-            color=discord.Color.greyple()
-        ))
-    lines = [f"`{i+1}.` {song['title']}" for i, song in enumerate(queue)]
-    embed = discord.Embed(
-        title="🎶 File d'attente",
-        description="\n".join(lines),
-        color=discord.Color.blurple()
-    )
-    embed.set_footer(text=f"Slayzix Shop • {len(queue)} chanson(s) en attente")
-    await interaction.response.send_message(embed=embed)
+# ================= MESSAGES PAR LANGUE =================
+
+MESSAGES = {
+    "fr": {
+        "ticket_title":   "🎫 Nouveau Ticket",
+        "ticket_desc":    "Le support sera avec vous rapidement.\n\nPour fermer ce ticket, appuyez sur le bouton Fermer.",
+        "ping_staff_tip": "🔔 Utilisez **Ping Staff** si aucune réponse après 15 min (cooldown 15 min)",
+        "close":          "🔴 Fermer",
+        "claim":          "🟢 Prendre en charge",
+        "unclaim":        "🔴 Rendre",
+        "transcript":     "📄 Transcript",
+        "ping_staff":     "🔔 Ping Staff",
+        "closing":        "🔒 Fermeture du ticket dans 5 secondes...",
+        "closed_by":      "Ticket fermé par",
+        "already_open":   "❌ Tu as déjà un ticket ouvert →",
+        "created":        "✅ Ticket créé →",
+    },
+    "en": {
+        "ticket_title":   "🎫 New Ticket",
+        "ticket_desc":    "Support will be with you shortly.\n\nTo close this ticket, press the close button below.",
+        "ping_staff_tip": "🔔 Use **Ping Staff** if no response after 15 min (15 min cooldown)",
+        "close":          "🔴 Close",
+        "claim":          "🟢 Claim",
+        "unclaim":        "🔴 Unclaim",
+        "transcript":     "📄 Transcript",
+        "ping_staff":     "🔔 Ping Staff",
+        "closing":        "🔒 Closing ticket in 5 seconds...",
+        "closed_by":      "Ticket closed by",
+        "already_open":   "❌ You already have an open ticket →",
+        "created":        "✅ Ticket created →",
+    }
+}
+
+# ================= PING STAFF COOLDOWN =================
+
+ping_staff_cooldown = {}  # channel_id -> last_ping timestamp
 
 
-@bot.tree.command(name="clearqueue", description="🗑️ Vide la file d'attente musicale")
-async def clearqueue(interaction: discord.Interaction):
-    get_music_queue(interaction.guild.id).clear()
-    await interaction.response.send_message(embed=discord.Embed(
-        title="🗑️ File d'attente vidée !",
-        color=discord.Color.orange()
-    ))
+# ================= VIEWS =================
 
+class TicketActionsView(discord.ui.View):
+    """Boutons dans le salon du ticket."""
 
-@bot.tree.command(name="np", description="🎵 Affiche la chanson en cours de lecture")
-async def nowplaying(interaction: discord.Interaction):
-    vc = interaction.guild.voice_client
-    if vc and vc.is_playing():
-        await interaction.response.send_message(embed=discord.Embed(
-            title="🎵 En cours de lecture",
-            description="Utilise `/queue` pour voir les prochaines chansons.",
-            color=discord.Color.green()
-        ))
-    else:
-        await interaction.response.send_message("❌ Aucune musique en cours.", ephemeral=True)
-
-
-# ================= WELCOME / GOODBYE =================
-
-@bot.event
-async def on_member_join(member):
-    if autoping_channel_id:
-        ch = member.guild.get_channel(autoping_channel_id)
-        if ch:
-            await ch.send(
-                f"👋 Bienvenue {member.mention} sur **{member.guild.name}** !",
-                allowed_mentions=discord.AllowedMentions(users=True)
-            )
-
-    if autodiscret_channel_id:
-        ch = member.guild.get_channel(autodiscret_channel_id)
-        if ch:
-            msg = await ch.send(
-                f"👋 Bienvenue {member.mention} sur **{member.guild.name}** !",
-                allowed_mentions=discord.AllowedMentions(users=True)
-            )
-            await asyncio.sleep(1)
-            await msg.delete()
-
-    if welcome_channel_id:
-        ch = member.guild.get_channel(welcome_channel_id)
-        if ch:
-            embed = discord.Embed(
-                title="🎉 Bienvenue sur le serveur !",
-                description=(
-                    f"Salut {member.mention}, on est ravis de t'accueillir sur **{member.guild.name}** ! 🙌\n\n"
-                    f"Tu es le **{member.guild.member_count}ème** membre à nous rejoindre.\n\n"
-                    "──────────────────────\n"
-                    "🛒 Consulte nos services et passe ta commande !\n"
-                    "💬 Notre équipe est là pour t'aider."
-                ),
-                color=discord.Color.green()
-            )
-            embed.set_thumbnail(url=member.display_avatar.url)
-            embed.set_footer(text=f"Slayzix Shop • Bienvenue parmi nous ! • {discord.utils.utcnow().strftime('%d/%m/%Y %H:%M')}")
-            await ch.send(content=member.mention, embed=embed, allowed_mentions=discord.AllowedMentions(users=True))
-
-
-@bot.event
-async def on_member_remove(member):
-    if not goodbye_channel_id:
-        return
-    ch = member.guild.get_channel(goodbye_channel_id)
-    if not ch:
-        return
-    embed = discord.Embed(
-        title="👋 Départ du serveur",
-        description=(
-            f"**{member.name}** vient de quitter **{member.guild.name}**...\n\n"
-            f"Il reste désormais **{member.guild.member_count} membres** sur le serveur.\n\n"
-            "──────────────────────\n"
-            "😊 On espère te revoir bientôt !"
-        ),
-        color=discord.Color.red()
-    )
-    embed.set_thumbnail(url=member.display_avatar.url)
-    embed.set_footer(text=f"Slayzix Shop • À bientôt ! • {discord.utils.utcnow().strftime('%d/%m/%Y %H:%M')}")
-    await ch.send(embed=embed)
-
-
-# ================= /welcome / /goodbye =================
-
-class WelcomeChannelSelect(discord.ui.ChannelSelect):
-    def __init__(self):
-        super().__init__(placeholder="Choisis le salon de bienvenue", channel_types=[discord.ChannelType.text])
-    async def callback(self, interaction: discord.Interaction):
-        global welcome_channel_id
-        welcome_channel_id = self.values[0].id
-        await interaction.response.send_message(f"✅ Salon de bienvenue : {self.values[0].mention}", ephemeral=True)
-
-class WelcomeSetupView(discord.ui.View):
-    def __init__(self):
+    def __init__(self, lang: str, ticket_type: str, payment: str):
         super().__init__(timeout=None)
-        self.add_item(WelcomeChannelSelect())
+        self.lang = lang
+        m = MESSAGES[lang]
+        # On crée les boutons dynamiquement pour avoir les bons labels
+        close_btn = discord.ui.Button(label=m["close"], style=discord.ButtonStyle.danger, custom_id="ticket_close", row=0)
+        claim_btn = discord.ui.Button(label=m["claim"], style=discord.ButtonStyle.success, custom_id="ticket_claim", row=0)
+        unclaim_btn = discord.ui.Button(label=m["unclaim"], style=discord.ButtonStyle.secondary, custom_id="ticket_unclaim", row=0)
+        transcript_btn = discord.ui.Button(label=m["transcript"], style=discord.ButtonStyle.primary, custom_id="ticket_transcript", row=0)
+        ping_btn = discord.ui.Button(label=m["ping_staff"], style=discord.ButtonStyle.secondary, emoji="🔔", custom_id="ticket_ping_staff", row=1)
 
-@bot.tree.command(name="welcome", description="⚙️ Configurer le salon de bienvenue")
-@discord.app_commands.checks.has_permissions(administrator=True)
-async def welcome(interaction: discord.Interaction):
-    await interaction.response.send_message(
-        embed=discord.Embed(title="⚙️ Salon de bienvenue", color=discord.Color.green()),
-        view=WelcomeSetupView(), ephemeral=True
-    )
+        close_btn.callback = self.close_callback
+        claim_btn.callback = self.claim_callback
+        unclaim_btn.callback = self.unclaim_callback
+        transcript_btn.callback = self.transcript_callback
+        ping_btn.callback = self.ping_staff_callback
 
+        self.add_item(close_btn)
+        self.add_item(claim_btn)
+        self.add_item(unclaim_btn)
+        self.add_item(transcript_btn)
+        self.add_item(ping_btn)
 
-class GoodbyeChannelSelect(discord.ui.ChannelSelect):
-    def __init__(self):
-        super().__init__(placeholder="Choisis le salon d'au revoir", channel_types=[discord.ChannelType.text])
-    async def callback(self, interaction: discord.Interaction):
-        global goodbye_channel_id
-        goodbye_channel_id = self.values[0].id
-        await interaction.response.send_message(f"✅ Salon d'au revoir : {self.values[0].mention}", ephemeral=True)
-
-class GoodbyeSetupView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.add_item(GoodbyeChannelSelect())
-
-@bot.tree.command(name="goodbye", description="⚙️ Configurer le salon d'au revoir")
-@discord.app_commands.checks.has_permissions(administrator=True)
-async def goodbye(interaction: discord.Interaction):
-    await interaction.response.send_message(
-        embed=discord.Embed(title="⚙️ Salon d'au revoir", color=discord.Color.red()),
-        view=GoodbyeSetupView(), ephemeral=True
-    )
-
-
-# ================= TICKETS =================
-
-class CloseTicketView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @discord.ui.button(label="🔒 Fermer le ticket", style=discord.ButtonStyle.danger, custom_id="close_ticket")
-    async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.channel.send(embed=discord.Embed(
-            title="🔒 Fermeture du ticket",
-            description=f"Ticket fermé par {interaction.user.mention}",
-            color=discord.Color.red()
-        ))
+    async def close_callback(self, interaction: discord.Interaction):
+        m = MESSAGES[self.lang]
+        await interaction.response.send_message(m["closing"], ephemeral=False)
+        # Log
         if ticket_config["log_channel"]:
             lc = interaction.guild.get_channel(ticket_config["log_channel"])
             if lc:
-                e = discord.Embed(title="📋 Ticket fermé", description=f"**Salon :** {interaction.channel.name}\n**Par :** {interaction.user.mention}", color=discord.Color.red())
+                e = discord.Embed(
+                    title="📋 Ticket fermé",
+                    description=f"**Salon :** {interaction.channel.name}\n**Par :** {interaction.user.mention}",
+                    color=discord.Color.red()
+                )
                 e.timestamp = discord.utils.utcnow()
                 await lc.send(embed=e)
+        # Retire de open_tickets
         for uid, cid in list(open_tickets.items()):
             if cid == interaction.channel.id:
                 del open_tickets[uid]
                 break
-        await interaction.response.send_message("Fermeture dans 3 secondes...", ephemeral=True)
-        await asyncio.sleep(3)
+        await asyncio.sleep(5)
         await interaction.channel.delete()
 
+    async def claim_callback(self, interaction: discord.Interaction):
+        embed = discord.Embed(
+            description=f"✅ Ticket pris en charge par {interaction.user.mention}" if self.lang == "fr" else f"✅ Ticket claimed by {interaction.user.mention}",
+            color=discord.Color.green()
+        )
+        await interaction.response.send_message(embed=embed)
 
-async def open_ticket_for(interaction: discord.Interaction, ticket_type: str = "Général"):
+    async def unclaim_callback(self, interaction: discord.Interaction):
+        embed = discord.Embed(
+            description=f"🔄 Ticket rendu par {interaction.user.mention}" if self.lang == "fr" else f"🔄 Ticket unclaimed by {interaction.user.mention}",
+            color=discord.Color.orange()
+        )
+        await interaction.response.send_message(embed=embed)
+
+    async def transcript_callback(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        messages = []
+        async for msg in interaction.channel.history(limit=200, oldest_first=True):
+            if not msg.author.bot:
+                messages.append(f"[{msg.created_at.strftime('%d/%m/%Y %H:%M')}] {msg.author.name}: {msg.content}")
+        if not messages:
+            content = "Aucun message." if self.lang == "fr" else "No messages."
+            return await interaction.followup.send(content, ephemeral=True)
+        transcript_text = "\n".join(messages)
+        file = discord.File(
+            fp=__import__("io").BytesIO(transcript_text.encode()),
+            filename=f"transcript-{interaction.channel.name}.txt"
+        )
+        await interaction.followup.send(
+            "📄 Transcript généré !" if self.lang == "fr" else "📄 Transcript generated!",
+            file=file,
+            ephemeral=True
+        )
+
+    async def ping_staff_callback(self, interaction: discord.Interaction):
+        now = datetime.utcnow().timestamp()
+        last_ping = ping_staff_cooldown.get(interaction.channel.id, 0)
+        if now - last_ping < 900:  # 15 minutes
+            remaining = int(900 - (now - last_ping))
+            msg = f"⏳ Cooldown actif ! Réessaie dans **{remaining // 60}m {remaining % 60}s**." if self.lang == "fr" else f"⏳ Cooldown active! Try again in **{remaining // 60}m {remaining % 60}s**."
+            return await interaction.response.send_message(msg, ephemeral=True)
+        ping_staff_cooldown[interaction.channel.id] = now
+        role = interaction.guild.get_role(ticket_config["support_role"]) if ticket_config["support_role"] else None
+        if role:
+            await interaction.channel.send(
+                f"🔔 {role.mention} — " + ("Un client attend de l'aide !" if self.lang == "fr" else "A customer needs help!"),
+                allowed_mentions=discord.AllowedMentions(roles=True)
+            )
+        await interaction.response.send_message("✅ Staff pingé !" if self.lang == "fr" else "✅ Staff pinged!", ephemeral=True)
+
+
+class LangSelect(discord.ui.Select):
+    """Étape 3 : choix de la langue."""
+
+    def __init__(self, ticket_type: str, payment: str, user_id: int):
+        super().__init__(
+            placeholder="🌍 Select your language / Choisissez votre langue...",
+            min_values=1, max_values=1,
+            options=LANG_OPTIONS,
+            custom_id="lang_select"
+        )
+        self.ticket_type = ticket_type
+        self.payment = payment
+        self.user_id = user_id
+
+    async def callback(self, interaction: discord.Interaction):
+        lang = self.values[0]
+        await interaction.response.defer(ephemeral=True)
+        await create_ticket_channel(interaction, self.ticket_type, self.payment, lang)
+
+
+class LangView(discord.ui.View):
+    def __init__(self, ticket_type: str, payment: str, user_id: int):
+        super().__init__(timeout=120)
+        self.add_item(LangSelect(ticket_type, payment, user_id))
+
+
+class PaymentSelect(discord.ui.Select):
+    """Étape 2 : choix du moyen de paiement."""
+
+    def __init__(self, ticket_type: str, user_id: int):
+        super().__init__(
+            placeholder="💳 Select your payment method...",
+            min_values=1, max_values=1,
+            options=PAYMENT_OPTIONS,
+            custom_id="payment_select"
+        )
+        self.ticket_type = ticket_type
+        self.user_id = user_id
+
+    async def callback(self, interaction: discord.Interaction):
+        payment = self.values[0]
+        lang_embed = discord.Embed(
+            title="🌍 Language / Langue",
+            description="Please select your language to continue.\nVeuillez sélectionner votre langue pour continuer.",
+            color=discord.Color.blurple()
+        )
+        lang_embed.set_footer(text="Your ticket will be created after selection • Le ticket sera créé après la sélection")
+        await interaction.response.edit_message(
+            embed=lang_embed,
+            view=LangView(self.ticket_type, payment, self.user_id)
+        )
+
+
+class PaymentView(discord.ui.View):
+    def __init__(self, ticket_type: str, user_id: int):
+        super().__init__(timeout=120)
+        self.add_item(PaymentSelect(ticket_type, user_id))
+
+
+class TicketTypeSelect(discord.ui.Select):
+    """Étape 1 : choix du type de ticket."""
+
+    def __init__(self):
+        super().__init__(
+            placeholder="🎫 Select a category...",
+            min_values=1, max_values=1,
+            options=TICKET_TYPES,
+            custom_id="ticket_type_select"
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id in open_tickets:
+            existing = interaction.guild.get_channel(open_tickets[interaction.user.id])
+            if existing:
+                return await interaction.response.send_message(
+                    f"❌ You already have an open ticket → {existing.mention}",
+                    ephemeral=True
+                )
+
+        ticket_type = self.values[0]
+        payment_embed = discord.Embed(
+            title="💳 Payment Method",
+            description="Please select your preferred payment method to create your ticket:",
+            color=discord.Color.from_rgb(255, 215, 0)
+        )
+        payment_embed.set_footer(text="Your ticket will be created after selection")
+        await interaction.response.send_message(
+            embed=payment_embed,
+            view=PaymentView(ticket_type, interaction.user.id),
+            ephemeral=True
+        )
+
+
+class TicketPanelView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(TicketTypeSelect())
+
+
+# ================= CRÉATION DU SALON TICKET =================
+
+async def create_ticket_channel(interaction: discord.Interaction, ticket_type: str, payment: str, lang: str):
     guild = interaction.guild
     user = interaction.user
+    m = MESSAGES[lang]
+
     if user.id in open_tickets:
         existing = guild.get_channel(open_tickets[user.id])
         if existing:
-            return await interaction.response.send_message(f"❌ Ticket déjà ouvert → {existing.mention}", ephemeral=True)
+            await interaction.followup.send(f"{m['already_open']} {existing.mention}", ephemeral=True)
+            return
 
+    # Catégorie
     category = guild.get_channel(ticket_config["category"]) if ticket_config["category"] else None
     if not category:
         category = discord.utils.get(guild.categories, name="TICKETS") or await guild.create_category("TICKETS")
 
+    # Permissions
     overwrites = {
         guild.default_role: discord.PermissionOverwrite(read_messages=False),
-        user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-        guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
+        user: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True),
+        guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True),
     }
     if ticket_config["support_role"]:
         role = guild.get_role(ticket_config["support_role"])
         if role:
             overwrites[role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
 
-    channel = await guild.create_text_channel(name=f"ticket-{user.name}", overwrites=overwrites, category=category)
+    # Nom du salon
+    channel_name = f"{ticket_type.lower().replace(' ', '-')}-{user.name}"
+    channel = await guild.create_text_channel(name=channel_name, overwrites=overwrites, category=category)
     open_tickets[user.id] = channel.id
 
-    embed = discord.Embed(
-        title=f"🎫 Ticket — {ticket_type}",
-        description=f"👤 **Utilisateur :** {user.mention}\n📋 **Type :** {ticket_type}\n\n💬 {ticket_config['welcome_message']}",
-        color=discord.Color.blurple()
-    )
-    embed.set_footer(text="Slayzix Shop • Support")
-    embed.timestamp = discord.utils.utcnow()
-
+    # Mentions pour le ping
     mention_str = user.mention
     if ticket_config["support_role"]:
-        mention_str += f" | <@&{ticket_config['support_role']}>"
-    await channel.send(content=mention_str, embed=embed, view=CloseTicketView())
+        mention_str += f" <@&{ticket_config['support_role']}>"
 
+    # Embed dans le ticket
+    flag = "🇫🇷" if lang == "fr" else "🇬🇧"
+    embed = discord.Embed(
+        title=m["ticket_title"],
+        description=m["ticket_desc"],
+        color=discord.Color.red()
+    )
+    embed.add_field(name="📦 Type", value=ticket_type, inline=True)
+    embed.add_field(name="💳 Payment", value=payment, inline=True)
+    embed.add_field(name=f"{flag} Language", value="Français" if lang == "fr" else "English", inline=True)
+    embed.set_footer(text=m["ping_staff_tip"])
+    embed.timestamp = discord.utils.utcnow()
+
+    await channel.send(
+        content=mention_str,
+        embed=embed,
+        view=TicketActionsView(lang, ticket_type, payment),
+        allowed_mentions=discord.AllowedMentions(users=True, roles=True)
+    )
+
+    # Log
     if ticket_config["log_channel"]:
         lc = guild.get_channel(ticket_config["log_channel"])
         if lc:
-            e = discord.Embed(title="📋 Ticket ouvert", description=f"**Utilisateur :** {user.mention}\n**Type :** {ticket_type}\n**Salon :** {channel.mention}", color=discord.Color.green())
-            e.timestamp = discord.utils.utcnow()
-            await lc.send(embed=e)
+            log_embed = discord.Embed(
+                title="📋 Ticket ouvert" if lang == "fr" else "📋 Ticket opened",
+                description=f"**Utilisateur :** {user.mention}\n**Type :** {ticket_type}\n**Paiement :** {payment}\n**Langue :** {'Français' if lang == 'fr' else 'English'}\n**Salon :** {channel.mention}",
+                color=discord.Color.green()
+            )
+            log_embed.timestamp = discord.utils.utcnow()
+            await lc.send(embed=log_embed)
 
-    await interaction.response.send_message(f"✅ Ticket créé → {channel.mention}", ephemeral=True)
+    await interaction.followup.send(f"{m['created']} {channel.mention}", ephemeral=True)
 
 
-TICKET_OPTIONS = [
-    discord.SelectOption(label="Général",     emoji="🎫", description="Question générale",       value="Général"),
-    discord.SelectOption(label="Support",     emoji="❓", description="Problème / aide",          value="Support"),
-    discord.SelectOption(label="Commande",    emoji="💰", description="Passer une commande",      value="Commande"),
-    discord.SelectOption(label="Signalement", emoji="⚠️", description="Signaler un problème",     value="Signalement"),
-    discord.SelectOption(label="Partenariat", emoji="🤝", description="Proposer un partenariat",  value="Partenariat"),
-    discord.SelectOption(label="Giveaway",    emoji="🎉", description="Organiser un giveaway",    value="Giveaway"),
-    discord.SelectOption(label="Récompense",  emoji="🏆", description="Réclamer une récompense",  value="Récompense"),
-]
+# ================= COMMANDES DE CONFIGURATION =================
 
-class TicketSelect(discord.ui.Select):
-    def __init__(self):
-        super().__init__(placeholder="📂 Choisis le type de ticket...", min_values=1, max_values=1, options=TICKET_OPTIONS, custom_id="ticket_select")
-    async def callback(self, interaction: discord.Interaction):
-        await open_ticket_for(interaction, self.values[0])
-
-class TicketPanel(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.add_item(TicketSelect())
-
-class TicketCategorySelect(discord.ui.ChannelSelect):
+class SetupCategorySelect(discord.ui.ChannelSelect):
     def __init__(self):
         super().__init__(placeholder="📁 Catégorie des tickets", channel_types=[discord.ChannelType.category])
     async def callback(self, interaction: discord.Interaction):
         ticket_config["category"] = self.values[0].id
         await interaction.response.send_message(f"✅ Catégorie : **{self.values[0].name}**", ephemeral=True)
 
-class TicketLogSelect(discord.ui.ChannelSelect):
+class SetupLogSelect(discord.ui.ChannelSelect):
     def __init__(self):
         super().__init__(placeholder="📋 Salon des logs", channel_types=[discord.ChannelType.text])
     async def callback(self, interaction: discord.Interaction):
         ticket_config["log_channel"] = self.values[0].id
         await interaction.response.send_message(f"✅ Logs : {self.values[0].mention}", ephemeral=True)
 
-class TicketRoleSelect(discord.ui.RoleSelect):
+class SetupRoleSelect(discord.ui.RoleSelect):
     def __init__(self):
-        super().__init__(placeholder="👮 Rôle support")
+        super().__init__(placeholder="👮 Rôle support (staff)")
     async def callback(self, interaction: discord.Interaction):
         ticket_config["support_role"] = self.values[0].id
         await interaction.response.send_message(f"✅ Rôle support : {self.values[0].mention}", ephemeral=True)
 
-class TicketConfigView(discord.ui.View):
+class SetupView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
-        self.add_item(TicketCategorySelect())
-        self.add_item(TicketLogSelect())
-        self.add_item(TicketRoleSelect())
+        self.add_item(SetupCategorySelect())
+        self.add_item(SetupLogSelect())
+        self.add_item(SetupRoleSelect())
 
-class SendPanelView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-    @discord.ui.button(label="📨 Envoyer le panel ici", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="📨 Envoyer le panel ici", style=discord.ButtonStyle.success, row=2)
     async def send_panel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = discord.Embed(
-            title="🎫 SLAYZIX SHOP — Ouvre un ticket",
+        panel_embed = discord.Embed(
+            title="🎫 Support Ticket System",
             description=(
-                "Sélectionne le type de ta demande dans le menu ci-dessous !\n\n"
-                "🎫 **Général** — Question générale\n"
-                "❓ **Support** — Problème / aide\n"
-                "💰 **Commande** — Passer une commande\n"
-                "⚠️ **Signalement** — Signaler un problème\n"
-                "🤝 **Partenariat** — Proposer un partenariat\n"
-                "🎉 **Giveaway** — Organiser un giveaway\n"
-                "🏆 **Récompense** — Réclamer une récompense\n\n"
-                "⚡ Réponse rapide garantie !"
+                "Select a category below to create a support ticket.\n\n"
+                "Our team will assist you as soon as possible."
             ),
-            color=discord.Color.blurple()
+            color=discord.Color.from_rgb(180, 0, 0)
         )
-        embed.set_footer(text="Slayzix Shop • Un seul ticket à la fois par utilisateur")
-        await interaction.channel.send(embed=embed, view=TicketPanel())
+        panel_embed.set_footer(text="Please provide detailed information in your ticket")
+        await interaction.channel.send(embed=panel_embed, view=TicketPanelView())
         await interaction.response.send_message("✅ Panel envoyé !", ephemeral=True)
 
-@bot.tree.command(name="createticket", description="Configure et envoie le panel de tickets")
-@discord.app_commands.checks.has_permissions(administrator=True)
-async def createticket(interaction: discord.Interaction):
+
+@bot.command(name="setup")
+@commands.has_permissions(administrator=True)
+async def setup(ctx):
+    """Configure et déploie le panel de tickets."""
     embed = discord.Embed(
-        title="⚙️ Panel Tickets — Configuration",
-        description="**1️⃣** Catégorie\n**2️⃣** Salon des logs\n**3️⃣** Rôle support\n\nPuis envoie le panel 👇",
-        color=discord.Color.blurple()
-    )
-    await interaction.response.send_message(embed=embed, view=TicketConfigView(), ephemeral=True)
-    await interaction.followup.send("📨 Envoyer le panel :", view=SendPanelView(), ephemeral=True)
-
-
-# ================= MODÉRATION =================
-
-@bot.tree.command(name="clear", description="Supprime des messages dans ce salon")
-@discord.app_commands.describe(nombre="Nombre de messages à supprimer (1-100)")
-@discord.app_commands.checks.has_permissions(manage_messages=True)
-async def clear(interaction: discord.Interaction, nombre: int = 10):
-    if not 1 <= nombre <= 100:
-        return await interaction.response.send_message("❌ Entre 1 et 100.", ephemeral=True)
-    await interaction.response.defer(ephemeral=True)
-    deleted = await interaction.channel.purge(limit=nombre)
-    await interaction.followup.send(f"🗑️ **{len(deleted)}** message(s) supprimé(s).", ephemeral=True)
-
-
-@bot.tree.command(name="ban", description="Bannir un membre du serveur")
-@discord.app_commands.describe(membre="Le membre à bannir", raison="Raison du ban")
-@discord.app_commands.checks.has_permissions(ban_members=True)
-async def ban(interaction: discord.Interaction, membre: discord.Member, raison: str = "Aucune raison fournie"):
-    if membre.top_role >= interaction.user.top_role:
-        return await interaction.response.send_message("❌ Tu ne peux pas bannir ce membre.", ephemeral=True)
-    try:
-        await membre.send(embed=discord.Embed(title="🔨 Tu as été banni", description=f"**Serveur :** {interaction.guild.name}\n**Raison :** {raison}", color=discord.Color.red()))
-    except Exception:
-        pass
-    await membre.ban(reason=raison)
-    embed = discord.Embed(title="🔨 Membre banni", description=f"**Membre :** {membre.mention}\n**Raison :** {raison}\n**Par :** {interaction.user.mention}", color=discord.Color.red())
-    embed.timestamp = discord.utils.utcnow()
-    await interaction.response.send_message(embed=embed)
-
-
-@bot.tree.command(name="unban", description="Débannir un utilisateur par son ID")
-@discord.app_commands.describe(user_id="L'ID de l'utilisateur à débannir")
-@discord.app_commands.checks.has_permissions(ban_members=True)
-async def unban(interaction: discord.Interaction, user_id: str):
-    try:
-        user = await bot.fetch_user(int(user_id))
-        await interaction.guild.unban(user)
-        embed = discord.Embed(title="✅ Membre débanni", description=f"**Utilisateur :** {user.mention}\n**Par :** {interaction.user.mention}", color=discord.Color.green())
-        embed.timestamp = discord.utils.utcnow()
-        await interaction.response.send_message(embed=embed)
-    except discord.NotFound:
-        await interaction.response.send_message("❌ Utilisateur introuvable ou pas banni.", ephemeral=True)
-    except ValueError:
-        await interaction.response.send_message("❌ ID invalide.", ephemeral=True)
-
-
-@bot.tree.command(name="unbanall", description="Débannir TOUS les membres du serveur")
-@discord.app_commands.checks.has_permissions(administrator=True)
-async def unbanall(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    bans = [entry async for entry in interaction.guild.bans()]
-    count = 0
-    for entry in bans:
-        try:
-            await interaction.guild.unban(entry.user)
-            count += 1
-        except Exception:
-            pass
-    await interaction.followup.send(embed=discord.Embed(title="✅ Déban général", description=f"**{count}** membre(s) débanni(s).", color=discord.Color.green()), ephemeral=True)
-
-
-# ================= /hide =================
-
-@bot.tree.command(name="hide", description="Cache ce salon à @everyone (toggle)")
-@discord.app_commands.describe(salon="Salon à cacher (optionnel, défaut : salon actuel)")
-@discord.app_commands.checks.has_permissions(manage_channels=True)
-async def hide(interaction: discord.Interaction, salon: discord.TextChannel = None):
-    target = salon or interaction.channel
-    everyone = interaction.guild.default_role
-    overwrite = target.overwrites_for(everyone)
-
-    if overwrite.view_channel is False:
-        overwrite.view_channel = None
-        await target.set_permissions(everyone, overwrite=overwrite)
-        await interaction.response.send_message(f"👁️ {target.mention} est maintenant **visible** par @everyone.", ephemeral=True)
-    else:
-        overwrite.view_channel = False
-        await target.set_permissions(everyone, overwrite=overwrite)
-        await interaction.response.send_message(f"🔒 {target.mention} est maintenant **caché** à @everyone.", ephemeral=True)
-
-
-# ================= /autoping =================
-
-class AutopingChannelSelect(discord.ui.ChannelSelect):
-    def __init__(self):
-        super().__init__(placeholder="Choisis le salon d'autoping", channel_types=[discord.ChannelType.text])
-    async def callback(self, interaction: discord.Interaction):
-        global autoping_channel_id
-        autoping_channel_id = self.values[0].id
-        await interaction.response.send_message(f"✅ Autoping activé dans {self.values[0].mention}", ephemeral=True)
-
-class AutopingView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.add_item(AutopingChannelSelect())
-
-@bot.tree.command(name="autoping", description="Ping automatiquement les nouveaux membres dans un salon")
-@discord.app_commands.checks.has_permissions(administrator=True)
-async def autoping(interaction: discord.Interaction):
-    await interaction.response.send_message(
-        embed=discord.Embed(title="⚙️ Autoping", description="Sélectionne le salon.", color=discord.Color.blurple()),
-        view=AutopingView(), ephemeral=True
-    )
-
-@bot.tree.command(name="autopingdelete", description="Désactive l'autoping")
-@discord.app_commands.checks.has_permissions(administrator=True)
-async def autopingdelete(interaction: discord.Interaction):
-    global autoping_channel_id
-    if autoping_channel_id is None:
-        return await interaction.response.send_message("❌ Aucun autoping configuré.", ephemeral=True)
-    autoping_channel_id = None
-    await interaction.response.send_message("✅ Autoping désactivé.", ephemeral=True)
-
-
-# ================= /autodiscret =================
-
-class AutodiscretChannelSelect(discord.ui.ChannelSelect):
-    def __init__(self):
-        super().__init__(placeholder="Choisis le salon autodiscret", channel_types=[discord.ChannelType.text])
-    async def callback(self, interaction: discord.Interaction):
-        global autodiscret_channel_id
-        autodiscret_channel_id = self.values[0].id
-        await interaction.response.send_message(f"✅ Autodiscret activé dans {self.values[0].mention}", ephemeral=True)
-
-class AutodiscretView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.add_item(AutodiscretChannelSelect())
-
-@bot.tree.command(name="autodiscret", description="Ping discret : ping puis supprime après 1s")
-@discord.app_commands.checks.has_permissions(administrator=True)
-async def autodiscret(interaction: discord.Interaction):
-    await interaction.response.send_message(
-        embed=discord.Embed(title="⚙️ Autodiscret", description="Sélectionne le salon.", color=discord.Color.blurple()),
-        view=AutodiscretView(), ephemeral=True
-    )
-
-
-# ================= /say =================
-
-@bot.tree.command(name="say", description="Faire parler le bot")
-@discord.app_commands.describe(message="Le message à envoyer", salon="Salon cible (optionnel)")
-@discord.app_commands.checks.has_permissions(manage_messages=True)
-async def say(interaction: discord.Interaction, message: str, salon: discord.TextChannel = None):
-    target = salon or interaction.channel
-    await target.send(message)
-    await interaction.response.send_message(f"✅ Message envoyé dans {target.mention}.", ephemeral=True)
-
-
-# ================= /embed — MENU INTERACTIF COMPLET =================
-
-COULEURS_PRESET = {
-    "🔵 Blurple":       "5865f2",
-    "🟢 Vert":          "57f287",
-    "🔴 Rouge":         "ed4245",
-    "🟡 Jaune":         "fee75c",
-    "🟠 Orange":        "e67e22",
-    "🩷 Rose":          "ff73fa",
-    "⚫ Noir":          "23272a",
-    "⚪ Blanc":         "ffffff",
-    "🩵 Cyan":          "1abc9c",
-    "🟣 Violet":        "9b59b6",
-    "🎲 Aléatoire":     "random",
-    "✏️ Personnalisée": "custom",
-}
-
-
-def new_session():
-    return {
-        "titre": "",
-        "description": "",
-        "couleur": "5865f2",
-        "footer": "",
-        "image": "",
-        "thumbnail": "",
-        "auteur_nom": "",
-        "auteur_icon": "",
-        "fields": [],
-        "target_channel": None,
-    }
-
-
-def build_embed(session: dict, username: str) -> discord.Embed:
-    hex_val = session.get("couleur", "5865f2")
-    if hex_val == "random":
-        color = discord.Color(random.randint(0, 0xFFFFFF))
-    else:
-        try:
-            color = discord.Color(int(hex_val, 16))
-        except Exception:
-            color = discord.Color.blurple()
-
-    embed = discord.Embed(
-        title=session.get("titre") or None,
-        description=session.get("description") or None,
-        color=color
-    )
-    embed.timestamp = discord.utils.utcnow()
-
-    auteur_nom = session.get("auteur_nom", "")
-    auteur_icon = session.get("auteur_icon", "")
-    if auteur_nom:
-        if auteur_icon.startswith("http"):
-            embed.set_author(name=auteur_nom, icon_url=auteur_icon)
-        else:
-            embed.set_author(name=auteur_nom)
-
-    thumb = session.get("thumbnail", "")
-    if thumb.startswith("http"):
-        embed.set_thumbnail(url=thumb)
-
-    img = session.get("image", "")
-    if img.startswith("http"):
-        embed.set_image(url=img)
-
-    for field in session.get("fields", []):
-        embed.add_field(name=field["name"], value=field["value"], inline=field.get("inline", False))
-
-    footer = session.get("footer", "")
-    embed.set_footer(text=footer if footer else f"Slayzix Shop • Par {username}")
-
-    return embed
-
-
-class EmbedColorSelect(discord.ui.Select):
-    def __init__(self):
-        options = [discord.SelectOption(label=nom, value=val) for nom, val in COULEURS_PRESET.items()]
-        super().__init__(placeholder="🎨 Couleur...", options=options, custom_id="embed_color_select", row=0)
-
-    async def callback(self, interaction: discord.Interaction):
-        uid = interaction.user.id
-        if self.values[0] == "custom":
-            await interaction.response.send_modal(EmbedCustomColorModal(uid))
-        elif self.values[0] == "random":
-            embed_sessions[uid]["couleur"] = "random"
-            await interaction.response.send_message("✅ Couleur aléatoire sélectionnée !", ephemeral=True)
-        else:
-            embed_sessions[uid]["couleur"] = self.values[0]
-            await interaction.response.send_message("✅ Couleur enregistrée !", ephemeral=True)
-
-
-class EmbedChannelSelect(discord.ui.ChannelSelect):
-    def __init__(self, uid):
-        super().__init__(placeholder="📢 Salon d'envoi...", channel_types=[discord.ChannelType.text], row=1)
-        self.uid = uid
-
-    async def callback(self, interaction: discord.Interaction):
-        embed_sessions[self.uid]["target_channel"] = self.values[0].id
-        await interaction.response.send_message(f"✅ Salon cible : {self.values[0].mention}", ephemeral=True)
-
-
-class EmbedCustomColorModal(discord.ui.Modal, title="🎨 Couleur personnalisée"):
-    couleur = discord.ui.TextInput(label="Code hex (sans #)", placeholder="ex: ff0000", min_length=6, max_length=6)
-
-    def __init__(self, uid):
-        super().__init__()
-        self.uid = uid
-
-    async def on_submit(self, interaction: discord.Interaction):
-        try:
-            int(self.couleur.value, 16)
-            embed_sessions[self.uid]["couleur"] = self.couleur.value
-            await interaction.response.send_message(f"✅ Couleur `#{self.couleur.value}` enregistrée !", ephemeral=True)
-        except ValueError:
-            await interaction.response.send_message("❌ Code hex invalide.", ephemeral=True)
-
-
-class EmbedContenuModal(discord.ui.Modal, title="✏️ Contenu principal"):
-    titre = discord.ui.TextInput(label="Titre", placeholder="Titre de l'embed", max_length=256, required=False)
-    description = discord.ui.TextInput(
-        label="Description  (\\n = saut de ligne)",
-        placeholder="Ta description ici...",
-        style=discord.TextStyle.long,
-        max_length=4000,
-        required=False
-    )
-    footer = discord.ui.TextInput(label="Footer (optionnel)", placeholder="Texte en bas de l'embed", required=False, max_length=2048)
-
-    def __init__(self, uid):
-        super().__init__()
-        self.uid = uid
-
-    async def on_submit(self, interaction: discord.Interaction):
-        s = embed_sessions.get(self.uid, new_session())
-        s["titre"] = self.titre.value or ""
-        s["description"] = self.description.value.replace("\\n", "\n") if self.description.value else ""
-        s["footer"] = self.footer.value or ""
-        embed_sessions[self.uid] = s
-        await interaction.response.send_message("✅ Contenu enregistré !", ephemeral=True)
-
-
-class EmbedMediaModal(discord.ui.Modal, title="🖼️ Images & Auteur"):
-    image = discord.ui.TextInput(label="URL Image principale", placeholder="https://...", required=False)
-    thumbnail = discord.ui.TextInput(label="URL Thumbnail (petite image droite)", placeholder="https://...", required=False)
-    auteur_nom = discord.ui.TextInput(label="Nom de l'auteur (optionnel)", placeholder="ex: Slayzix Shop", required=False, max_length=256)
-    auteur_icon = discord.ui.TextInput(label="URL icône auteur (optionnel)", placeholder="https://...", required=False)
-
-    def __init__(self, uid):
-        super().__init__()
-        self.uid = uid
-
-    async def on_submit(self, interaction: discord.Interaction):
-        s = embed_sessions.get(self.uid, new_session())
-        s["image"] = self.image.value or ""
-        s["thumbnail"] = self.thumbnail.value or ""
-        s["auteur_nom"] = self.auteur_nom.value or ""
-        s["auteur_icon"] = self.auteur_icon.value or ""
-        embed_sessions[self.uid] = s
-        await interaction.response.send_message("✅ Médias & auteur enregistrés !", ephemeral=True)
-
-
-class EmbedFieldModal(discord.ui.Modal, title="➕ Ajouter un champ (field)"):
-    field_name = discord.ui.TextInput(label="Nom du champ", placeholder="ex: Prix", max_length=256)
-    field_value = discord.ui.TextInput(label="Valeur du champ", placeholder="ex: 10€", style=discord.TextStyle.long, max_length=1024)
-    inline = discord.ui.TextInput(label="Inline ? (oui / non)", placeholder="oui", max_length=3, required=False)
-
-    def __init__(self, uid):
-        super().__init__()
-        self.uid = uid
-
-    async def on_submit(self, interaction: discord.Interaction):
-        s = embed_sessions.get(self.uid, new_session())
-        if len(s["fields"]) >= 25:
-            return await interaction.response.send_message("❌ Maximum 25 champs.", ephemeral=True)
-        inline_val = self.inline.value.strip().lower() in ("oui", "o", "yes", "y", "true")
-        s["fields"].append({"name": self.field_name.value, "value": self.field_value.value, "inline": inline_val})
-        embed_sessions[self.uid] = s
-        await interaction.response.send_message(f"✅ Champ **{self.field_name.value}** ajouté ! ({len(s['fields'])}/25)", ephemeral=True)
-
-
-class EmbedBuilderView(discord.ui.View):
-    def __init__(self, uid):
-        super().__init__(timeout=300)
-        self.uid = uid
-        self.add_item(EmbedColorSelect())
-        self.add_item(EmbedChannelSelect(uid))
-
-    @discord.ui.button(label="✏️ Contenu", style=discord.ButtonStyle.primary, row=2)
-    async def write_content(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(EmbedContenuModal(self.uid))
-
-    @discord.ui.button(label="🖼️ Images & Auteur", style=discord.ButtonStyle.secondary, row=2)
-    async def write_media(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(EmbedMediaModal(self.uid))
-
-    @discord.ui.button(label="➕ Ajouter un champ", style=discord.ButtonStyle.secondary, row=2)
-    async def add_field(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(EmbedFieldModal(self.uid))
-
-    @discord.ui.button(label="🗑️ Vider les champs", style=discord.ButtonStyle.danger, row=3)
-    async def clear_fields(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed_sessions[self.uid]["fields"] = []
-        await interaction.response.send_message("✅ Champs supprimés.", ephemeral=True)
-
-    @discord.ui.button(label="👁️ Prévisualiser", style=discord.ButtonStyle.secondary, row=3)
-    async def preview(self, interaction: discord.Interaction, button: discord.ui.Button):
-        session = embed_sessions.get(self.uid, new_session())
-        e = build_embed(session, interaction.user.name)
-        await interaction.response.send_message("**Aperçu :**", embed=e, ephemeral=True)
-
-    @discord.ui.button(label="🚀 Envoyer", style=discord.ButtonStyle.success, row=3)
-    async def send_embed(self, interaction: discord.Interaction, button: discord.ui.Button):
-        session = embed_sessions.get(self.uid, new_session())
-        if not session.get("titre") and not session.get("description") and not session.get("fields"):
-            return await interaction.response.send_message("❌ Ajoute au moins un titre, une description ou un champ.", ephemeral=True)
-        target_id = session.get("target_channel")
-        target = interaction.guild.get_channel(target_id) if target_id else interaction.channel
-        e = build_embed(session, interaction.user.name)
-        await target.send(embed=e)
-        embed_sessions.pop(self.uid, None)
-        await interaction.response.send_message(f"✅ Embed envoyé dans {target.mention} !", ephemeral=True)
-
-    @discord.ui.button(label="❌ Annuler", style=discord.ButtonStyle.danger, row=3)
-    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed_sessions.pop(self.uid, None)
-        await interaction.response.send_message("❌ Création annulée.", ephemeral=True)
-
-
-@bot.tree.command(name="embed", description="Créer un embed personnalisé avec un menu interactif")
-@discord.app_commands.checks.has_permissions(manage_messages=True)
-async def embed_cmd(interaction: discord.Interaction):
-    uid = interaction.user.id
-    embed_sessions[uid] = new_session()
-
-    info = discord.Embed(
-        title="🛠️ Créateur d'embed",
+        title="⚙️ Configuration du Ticket System",
         description=(
-            "**1.** 🎨 Choisis une couleur\n"
-            "**2.** 📢 Choisis le salon d'envoi\n"
-            "**3.** ✏️ **Contenu** — Titre, description (`\\n` = saut de ligne), footer\n"
-            "**4.** 🖼️ **Images & Auteur** — Image principale, thumbnail, auteur\n"
-            "**5.** ➕ **Ajouter un champ** — Jusqu'à 25 fields\n"
-            "**6.** 👁️ Prévisualise puis 🚀 Envoie !"
+            "**1️⃣** Sélectionne la catégorie des tickets\n"
+            "**2️⃣** Sélectionne le salon des logs\n"
+            "**3️⃣** Sélectionne le rôle support\n\n"
+            "Puis clique sur **📨 Envoyer le panel ici** pour déployer !"
         ),
         color=discord.Color.blurple()
     )
-    info.set_footer(text="Menu valable 5 minutes")
-    await interaction.response.send_message(embed=info, view=EmbedBuilderView(uid), ephemeral=True)
+    await ctx.message.delete()
+    await ctx.send(embed=embed, view=SetupView())
 
 
-# ================= GIVEAWAY =================
 
-class GiveawayView(discord.ui.View):
-    def __init__(self, giveaway_id: int):
-        super().__init__(timeout=None)
-        self.giveaway_id = giveaway_id
+# ================= PPL COMMANDS =================
 
-    @discord.ui.button(label="🎉 Participer", style=discord.ButtonStyle.success, custom_id="giveaway_join")
-    async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if self.giveaway_id not in active_giveaways:
-            return await interaction.response.send_message("❌ Ce giveaway est terminé.", ephemeral=True)
-        giveaway = active_giveaways[self.giveaway_id]
-        if interaction.user.id in giveaway["participants"]:
-            giveaway["participants"].discard(interaction.user.id)
-            button.label = f"🎉 Participer — {len(giveaway['participants'])}"
-            await interaction.message.edit(view=self)
-            return await interaction.response.send_message("❌ Tu t'es retiré du giveaway.", ephemeral=True)
-        giveaway["participants"].add(interaction.user.id)
-        button.label = f"🎉 Participer — {len(giveaway['participants'])}"
-        await interaction.message.edit(view=self)
-        await interaction.response.send_message("✅ Tu participes ! Bonne chance 🍀", ephemeral=True)
+class PPLSaveModal(discord.ui.Modal, title="💳 Sauvegarder mon PPL PayPal"):
+    email = discord.ui.TextInput(
+        label="Email PayPal",
+        placeholder="exemple@email.com",
+        required=True,
+        max_length=100
+    )
+    nom = discord.ui.TextInput(
+        label="Nom affiché sur le compte PayPal",
+        placeholder="Jean Dupont",
+        required=True,
+        max_length=100
+    )
+    note = discord.ui.TextInput(
+        label="Note / Info supplémentaire (optionnel)",
+        placeholder="Ex: Compte pro, paiements en EUR...",
+        required=False,
+        max_length=300,
+        style=discord.TextStyle.long
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        uid = str(interaction.user.id)
+        ppl_data[uid] = {
+            "email": self.email.value.strip(),
+            "nom": self.nom.value.strip(),
+            "note": self.note.value.strip() if self.note.value else "",
+            "updated_at": datetime.utcnow().strftime("%d/%m/%Y %H:%M"),
+        }
+        save_ppl(ppl_data)
+        await interaction.response.send_message(
+            embed=discord.Embed(
+                title="✅ PPL sauvegardé !",
+                description="Ton PayPal a bien été enregistré.\nUtilise `*ppl` pour l'afficher.",
+                color=discord.Color.green()
+            ),
+            ephemeral=True
+        )
 
 
-async def end_giveaway(channel_id: int, message_id: int, guild: discord.Guild):
-    await asyncio.sleep(0.1)
-    if message_id not in active_giveaways:
-        return
-    giveaway = active_giveaways[message_id]
-    channel = guild.get_channel(channel_id)
-    if not channel:
-        return
-    try:
-        message = await channel.fetch_message(message_id)
-    except Exception:
-        return
+@bot.command(name="pplsave")
+async def pplsave(ctx):
+    """Ouvre le formulaire pour sauvegarder son PPL PayPal."""
 
-    participants = list(giveaway["participants"])
-    prize = giveaway["prize"]
-    host = giveaway["host"]
+    class PPLSaveView(discord.ui.View):
+        def __init__(self):
+            super().__init__(timeout=60)
 
-    if not participants:
-        embed = discord.Embed(title="🎉 GIVEAWAY TERMINÉ", description=f"**Prix :** {prize}\n**Organisateur :** <@{host}>\n\n😔 Aucun participant !", color=discord.Color.red())
-        embed.set_footer(text="Slayzix Shop • Giveaway terminé")
-        embed.timestamp = discord.utils.utcnow()
-        await message.edit(embed=embed, view=None)
-        await channel.send("😔 Aucun participant, pas de gagnant !")
-        del active_giveaways[message_id]
-        return
+        @discord.ui.button(label="💳 Sauvegarder mon PayPal", style=discord.ButtonStyle.success, emoji="💾")
+        async def open_modal(self, interaction: discord.Interaction, button: discord.ui.Button):
+            if interaction.user.id != ctx.author.id:
+                return await interaction.response.send_message("❌ Ce bouton n'est pas pour toi.", ephemeral=True)
+            await interaction.response.send_modal(PPLSaveModal())
 
-    winners = random.sample(participants, min(giveaway["winners"], len(participants)))
-    winners_mentions = " ".join([f"<@{w}>" for w in winners])
     embed = discord.Embed(
-        title="🎉 GIVEAWAY TERMINÉ",
-        description=f"**Prix :** {prize}\n**Gagnant(s) :** {winners_mentions}\n**Organisateur :** <@{host}>\n**Participants :** {len(participants)}",
-        color=discord.Color.gold()
+        title="💳 Sauvegarde PPL PayPal",
+        description=(
+            "Clique sur le bouton ci-dessous pour enregistrer ton adresse PayPal.\n\n"
+            "📌 Ces informations seront affichées quand tu utiliseras `*ppl`.\n"
+            "🔒 Seul toi peut modifier tes données."
+        ),
+        color=discord.Color.from_rgb(0, 48, 135)
     )
-    embed.set_footer(text="Slayzix Shop • Giveaway terminé")
-    embed.timestamp = discord.utils.utcnow()
-    await message.edit(embed=embed, view=None)
-    await channel.send(f"🎊 Félicitations {winners_mentions} ! Tu as gagné **{prize}** !\nContacte <@{host}> pour récupérer ton prix.")
-    del active_giveaways[message_id]
+    embed.set_thumbnail(url=ctx.author.display_avatar.url)
+    embed.set_footer(text="Tes données sont stockées localement sur le bot.")
+    await ctx.message.delete()
+    await ctx.send(embed=embed, view=PPLSaveView())
 
 
-@bot.tree.command(name="giveaway", description="Lance un giveaway !")
-@discord.app_commands.describe(duree="Durée (ex: 10s, 5m, 1h, 2d)", gagnants="Nombre de gagnants", prix="Ce que tu fais gagner")
-@discord.app_commands.checks.has_permissions(manage_guild=True)
-async def giveaway(interaction: discord.Interaction, duree: str, gagnants: int, prix: str):
-    try:
-        unit = duree[-1].lower()
-        value = int(duree[:-1])
-        multipliers = {"s": 1, "m": 60, "h": 3600, "d": 86400}
-        if unit not in multipliers:
-            raise ValueError
-        seconds = value * multipliers[unit]
-    except Exception:
-        return await interaction.response.send_message("❌ Format invalide. Ex : `30s`, `5m`, `1h`, `2d`", ephemeral=True)
+@bot.command(name="ppl")
+async def ppl(ctx):
+    """Affiche le PPL PayPal de la personne qui exécute la commande — visible par tous, jamais supprimé."""
+    uid = str(ctx.author.id)
+    await ctx.message.delete()
 
-    if gagnants < 1:
-        return await interaction.response.send_message("❌ Minimum 1 gagnant.", ephemeral=True)
+    if uid not in ppl_data or not ppl_data[uid].get("email"):
+        embed = discord.Embed(
+            title="❌ Aucun PPL enregistré",
+            description=(
+                f"{ctx.author.mention}, tu n'as pas encore sauvegardé ton PayPal.\n\n"
+                "Utilise `*pplsave` pour enregistrer ton adresse PayPal."
+            ),
+            color=discord.Color.red()
+        )
+        embed.set_thumbnail(url=ctx.author.display_avatar.url)
+        return await ctx.send(embed=embed, delete_after=10)
 
-    end_timestamp = int((datetime.utcnow() + timedelta(seconds=seconds)).timestamp())
+    data = ppl_data[uid]
+    email = data["email"]
+
+    class CopyPPLView(discord.ui.View):
+        def __init__(self):
+            super().__init__(timeout=None)
+
+        @discord.ui.button(label="📋 Copier le PayPal", style=discord.ButtonStyle.secondary, emoji="💳")
+        async def copy_ppl(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await interaction.response.send_message(
+                f"📋 **PayPal de {ctx.author.display_name} :**\n```{email}```\n*Clique sur l'email ci-dessus pour le copier !*",
+                ephemeral=True
+            )
+
     embed = discord.Embed(
-        title="🎉 GIVEAWAY",
-        description=f"**Prix :** {prix}\n**Gagnant(s) :** {gagnants}\n**Organisateur :** {interaction.user.mention}\n**Fin :** <t:{end_timestamp}:R> (<t:{end_timestamp}:f>)\n\nClique sur 🎉 pour participer !",
-        color=discord.Color.blurple()
+        title="💳 Informations PayPal",
+        color=discord.Color.from_rgb(0, 48, 135)
     )
-    embed.set_footer(text="Slayzix Shop • Giveaway")
+    embed.set_author(
+        name=ctx.author.display_name,
+        icon_url=ctx.author.display_avatar.url
+    )
+    embed.add_field(
+        name="📧 Email PayPal",
+        value=f"```{email}```",
+        inline=False
+    )
+    embed.add_field(
+        name="👤 Nom du compte",
+        value=f"```{data['nom']}```",
+        inline=True
+    )
+    embed.add_field(
+        name="🕐 Dernière mise à jour",
+        value=f"`{data.get('updated_at', 'Inconnu')}`",
+        inline=True
+    )
+    if data.get("note"):
+        embed.add_field(
+            name="📝 Note",
+            value=data["note"],
+            inline=False
+        )
+    embed.set_thumbnail(url="https://www.paypalobjects.com/webstatic/mktg/logo/pp_cc_mark_111x69.jpg")
+    embed.set_footer(text=f"PPL de {ctx.author.name} • Utilise *pplsave pour modifier")
     embed.timestamp = discord.utils.utcnow()
 
-    await interaction.response.send_message("✅ Giveaway lancé !", ephemeral=True)
-    msg = await interaction.channel.send(embed=embed)
-    active_giveaways[msg.id] = {"prize": prix, "winners": gagnants, "host": interaction.user.id, "participants": set(), "channel_id": interaction.channel.id}
-    await msg.edit(view=GiveawayView(msg.id))
-    await asyncio.sleep(seconds)
-    await end_giveaway(interaction.channel.id, msg.id, interaction.guild)
+    await ctx.send(embed=embed, view=CopyPPLView())
 
 
-@bot.tree.command(name="reroll", description="Nouveau tirage pour un giveaway terminé")
-@discord.app_commands.describe(message_id="L'ID du message du giveaway")
-@discord.app_commands.checks.has_permissions(manage_guild=True)
-async def reroll(interaction: discord.Interaction, message_id: str):
-    try:
-        await interaction.channel.fetch_message(int(message_id))
-    except Exception:
-        return await interaction.response.send_message("❌ Message introuvable.", ephemeral=True)
-    await interaction.response.send_message("🎲 Les participants ne sont plus dispo après la fin. Utilise `/giveaway` pour relancer !", ephemeral=True)
-
-
-@bot.tree.command(name="giveawayend", description="Terminer un giveaway manuellement")
-@discord.app_commands.describe(message_id="L'ID du message du giveaway")
-@discord.app_commands.checks.has_permissions(manage_guild=True)
-async def giveawayend(interaction: discord.Interaction, message_id: str):
-    msg_id = int(message_id)
-    if msg_id not in active_giveaways:
-        return await interaction.response.send_message("❌ Giveaway introuvable ou déjà terminé.", ephemeral=True)
-    await interaction.response.send_message("✅ Giveaway terminé manuellement !", ephemeral=True)
-    await end_giveaway(interaction.channel.id, msg_id, interaction.guild)
-
-
-# ================= VOUCH =================
-
-class VouchChannelSelect(discord.ui.ChannelSelect):
-    def __init__(self):
-        super().__init__(placeholder="Choisis le salon des avis", channel_types=[discord.ChannelType.text])
-    async def callback(self, interaction: discord.Interaction):
-        global vouch_channel_id
-        vouch_channel_id = self.values[0].id
-        await interaction.response.send_message(f"✅ Salon des avis : {self.values[0].mention} !", ephemeral=True)
-
-class VouchSetupView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.add_item(VouchChannelSelect())
-
-@bot.tree.command(name="setvouchchannel", description="⚙️ Configurer le salon des avis")
-@discord.app_commands.checks.has_permissions(administrator=True)
-async def setvouchchannel(interaction: discord.Interaction):
-    await interaction.response.send_message(
-        embed=discord.Embed(title="⚙️ Salon des avis", color=discord.Color.blurple()),
-        view=VouchSetupView(), ephemeral=True
+@bot.command(name="ppldelete")
+async def ppldelete(ctx):
+    """Supprime le PPL sauvegardé de la personne."""
+    uid = str(ctx.author.id)
+    await ctx.message.delete()
+    if uid not in ppl_data:
+        return await ctx.send(
+            embed=discord.Embed(description="❌ Aucun PPL à supprimer.", color=discord.Color.red()),
+            delete_after=8
+        )
+    del ppl_data[uid]
+    save_ppl(ppl_data)
+    await ctx.send(
+        embed=discord.Embed(
+            title="🗑️ PPL supprimé",
+            description="Ton adresse PayPal a été supprimée avec succès.",
+            color=discord.Color.orange()
+        ),
+        delete_after=8
     )
 
 
-class VouchRoleSelect(discord.ui.RoleSelect):
-    def __init__(self):
-        super().__init__(placeholder="Choisis le rôle attribué après un vouch")
-    async def callback(self, interaction: discord.Interaction):
-        global vouch_role_id
-        vouch_role_id = self.values[0].id
-        await interaction.response.send_message(f"✅ Rôle vouch : {self.values[0].mention} !", ephemeral=True)
+# ================= /HELP =================
 
-class VouchRoleSetupView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.add_item(VouchRoleSelect())
-
-@bot.tree.command(name="setvouchrole", description="⚙️ Configurer le rôle attribué après un vouch")
-@discord.app_commands.checks.has_permissions(administrator=True)
-async def setvouchrole(interaction: discord.Interaction):
-    await interaction.response.send_message(
-        embed=discord.Embed(title="⚙️ Rôle Vouch", color=discord.Color.blurple()),
-        view=VouchRoleSetupView(), ephemeral=True
+@bot.tree.command(name="help", description="📋 Affiche toutes les commandes disponibles")
+async def help_cmd(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="📋 Liste des commandes",
+        description="Toutes les commandes utilisent le préfixe **`*`**",
+        color=discord.Color.from_rgb(0, 48, 135)
     )
 
+    embed.add_field(
+        name="🎫 __Tickets__",
+        value=(
+            "`*setup` — *(Admin)* Configure et déploie le panel de tickets\n"
+        ),
+        inline=False
+    )
 
-@bot.tree.command(name="vouch", description="Laisse un avis sur le shop !")
-@discord.app_commands.describe(note="Ta note sur 5", service="Le service acheté", commentaire="Ton commentaire")
-@discord.app_commands.choices(note=[
-    discord.app_commands.Choice(name="⭐ 1/5", value=1),
-    discord.app_commands.Choice(name="⭐⭐ 2/5", value=2),
-    discord.app_commands.Choice(name="⭐⭐⭐ 3/5", value=3),
-    discord.app_commands.Choice(name="⭐⭐⭐⭐ 4/5", value=4),
-    discord.app_commands.Choice(name="⭐⭐⭐⭐⭐ 5/5", value=5),
-])
-async def vouch(interaction: discord.Interaction, note: int, service: str, commentaire: str):
-    stars = "⭐" * note + "🌑" * (5 - note)
-    colors = {1: discord.Color.red(), 2: discord.Color.orange(), 3: discord.Color.yellow(), 4: discord.Color.green(), 5: discord.Color.gold()}
-    badges = {1: "😡 Très mauvais", 2: "😕 Mauvais", 3: "😐 Correct", 4: "😊 Bien", 5: "🤩 Excellent !"}
+    embed.add_field(
+        name="💳 __PayPal (PPL)__",
+        value=(
+            "`*pplsave` — Enregistre ton adresse PayPal\n"
+            "`*ppl` — Affiche ton PayPal avec un bouton Copier\n"
+            "`*ppldelete` — Supprime ton PayPal enregistré\n"
+        ),
+        inline=False
+    )
 
-    embed = discord.Embed(title="📝 Nouvel Avis — Slayzix Shop", color=colors[note])
-    embed.add_field(name="👤 Client", value=interaction.user.mention, inline=True)
-    embed.add_field(name="📦 Service", value=f"**{service}**", inline=True)
-    embed.add_field(name="⭐ Note", value=f"{stars}  `{note}/5` — {badges[note]}", inline=False)
-    embed.add_field(name="💬 Commentaire", value=f"*{commentaire}*", inline=False)
-    embed.set_thumbnail(url=interaction.user.display_avatar.url)
-    embed.set_footer(text="Slayzix Shop • Merci pour ton avis !")
+    embed.add_field(
+        name="ℹ️ __Infos__",
+        value=(
+            "• Les commandes `*` suppriment ton message automatiquement\n"
+            "• `*ppl` est visible par tout le monde et ne disparaît jamais\n"
+            "• `*pplsave` — seul toi peux modifier tes données\n"
+            "• `/help` — cette commande"
+        ),
+        inline=False
+    )
+
+    embed.set_thumbnail(url=interaction.guild.icon.url if interaction.guild.icon else discord.Embed.Empty)
+    embed.set_footer(text="Préfixe : * • Slash : /help uniquement")
     embed.timestamp = discord.utils.utcnow()
-
-    role_added = False
-    role = None
-    if vouch_role_id:
-        role = interaction.guild.get_role(vouch_role_id)
-        if role and role not in interaction.user.roles:
-            try:
-                await interaction.user.add_roles(role, reason="Vouch effectué")
-                role_added = True
-            except discord.Forbidden:
-                pass
-
-    if vouch_channel_id:
-        ch = interaction.guild.get_channel(vouch_channel_id)
-        if ch:
-            await ch.send(embed=embed)
-            msg = f"✅ Avis posté dans {ch.mention}, merci ! 🙏"
-            if role_added:
-                msg += f"\n🎖️ Rôle **{role.name}** attribué !"
-            return await interaction.response.send_message(msg, ephemeral=True)
-
-    await interaction.response.send_message(embed=embed)
-    if role_added:
-        await interaction.followup.send(f"🎖️ Rôle **{role.name}** attribué !", ephemeral=True)
-
-
-# ================= ON MESSAGE =================
-
-@bot.event
-async def on_message(message):
-    if message.author.bot:
-        return
-    if vouch_channel_id and vouch_role_id and message.channel.id == vouch_channel_id:
-        role = message.guild.get_role(vouch_role_id)
-        if role and role not in message.author.roles:
-            try:
-                await message.author.add_roles(role, reason="Message dans le salon vouch")
-            except discord.Forbidden:
-                pass
-    await bot.process_commands(message)
-
-
-# ================= /osint =================
-
-OSINT_PLATFORMS = [
-    {"name": "GitHub",     "url": "https://github.com/{}",                          "emoji": "💻", "not_found_indicators": ["Not Found", "This is not the web page you are looking for"], "found_indicators": []},
-    {"name": "Reddit",     "url": "https://www.reddit.com/user/{}/",                "emoji": "🟠", "not_found_indicators": ["Sorry, nobody on Reddit goes by that name", "page not found"], "found_indicators": []},
-    {"name": "Twitter/X",  "url": "https://twitter.com/{}",                         "emoji": "🐦", "not_found_indicators": ["This account doesn\\'t exist", "page does not exist", "account suspended"], "found_indicators": []},
-    {"name": "TikTok",     "url": "https://www.tiktok.com/@{}",                     "emoji": "🎵", "not_found_indicators": ["Couldn\\'t find this account", "couldn't find this account"], "found_indicators": ["followers", "following", "likes"]},
-    {"name": "Instagram",  "url": "https://www.instagram.com/{}/",                  "emoji": "📸", "not_found_indicators": ["Sorry, this page isn\\'t available", "Page Not Found"], "found_indicators": []},
-    {"name": "YouTube",    "url": "https://www.youtube.com/@{}",                    "emoji": "▶️", "not_found_indicators": ["404", "This page isn\\'t available"], "found_indicators": ["subscribers", "abonnés", "videos"]},
-    {"name": "Twitch",     "url": "https://www.twitch.tv/{}",                       "emoji": "🟣", "not_found_indicators": ["Sorry. Unless you\\'ve got a time machine", "404"], "found_indicators": []},
-    {"name": "Pinterest",  "url": "https://www.pinterest.com/{}/",                  "emoji": "📌", "not_found_indicators": ["The page you were looking for doesn\\'t exist", "Hmm, we couldn\\'t find that page"], "found_indicators": []},
-    {"name": "Snapchat",   "url": "https://www.snapchat.com/add/{}",                "emoji": "👻", "not_found_indicators": ["Sorry, we couldn\\'t find", "404"], "found_indicators": ["Add me on Snapchat", "snapchat.com/add"]},
-    {"name": "Steam",      "url": "https://steamcommunity.com/id/{}",               "emoji": "🎮", "not_found_indicators": ["The specified profile could not be found", "error"], "found_indicators": ["profile_header", "persona_name"]},
-    {"name": "Spotify",    "url": "https://open.spotify.com/user/{}",               "emoji": "🎧", "not_found_indicators": ["Page not found", "Spotify - Web Player"], "found_indicators": []},
-    {"name": "Roblox",     "url": "https://www.roblox.com/user.aspx?username={}",   "emoji": "🧱", "not_found_indicators": ["Page cannot be found", "404"], "found_indicators": []},
-    {"name": "Minecraft",  "url": "https://api.mojang.com/users/profiles/minecraft/{}", "emoji": "⛏️", "not_found_indicators": ["errorMessage", "null"], "found_indicators": ["\"id\"", "\"name\""]},
-    {"name": "DeviantArt", "url": "https://www.deviantart.com/{}",                  "emoji": "🎨", "not_found_indicators": ["Page Not Found", "This page is not available"], "found_indicators": []},
-    {"name": "Flickr",     "url": "https://www.flickr.com/people/{}",               "emoji": "📷", "not_found_indicators": ["Page Not Found", "Oops"], "found_indicators": []},
-    {"name": "Patreon",    "url": "https://www.patreon.com/{}",                     "emoji": "💰", "not_found_indicators": ["Page Not Found", "404"], "found_indicators": []},
-    {"name": "Linktree",   "url": "https://linktr.ee/{}",                           "emoji": "🌳", "not_found_indicators": ["Sorry, this page isn\\'t available", "404"], "found_indicators": []},
-    {"name": "Soundcloud", "url": "https://soundcloud.com/{}",                      "emoji": "🎶", "not_found_indicators": ["We can\\'t find that user", "404"], "found_indicators": []},
-    {"name": "Behance",    "url": "https://www.behance.net/{}",                     "emoji": "🖼️", "not_found_indicators": ["The page you requested was not found", "404"], "found_indicators": []},
-    {"name": "Medium",     "url": "https://medium.com/@{}",                         "emoji": "✍️", "not_found_indicators": ["Page not found", "404"], "found_indicators": []},
-]
-
-async def check_platform(session: aiohttp.ClientSession, platform: dict, username: str) -> dict:
-    url = platform["url"].format(username)
-    try:
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=8), allow_redirects=True) as resp:
-            if resp.status == 404:
-                return {"name": platform["name"], "emoji": platform["emoji"], "url": url, "found": False}
-            if resp.status != 200:
-                return {"name": platform["name"], "emoji": platform["emoji"], "url": url, "found": False}
-            content = await resp.text(errors="ignore")
-            content_lower = content.lower()
-            for indicator in platform.get("not_found_indicators", []):
-                if indicator.lower() in content_lower:
-                    return {"name": platform["name"], "emoji": platform["emoji"], "url": url, "found": False}
-            found_indicators = platform.get("found_indicators", [])
-            if found_indicators:
-                for indicator in found_indicators:
-                    if indicator.lower() in content_lower:
-                        return {"name": platform["name"], "emoji": platform["emoji"], "url": url, "found": True}
-                return {"name": platform["name"], "emoji": platform["emoji"], "url": url, "found": False}
-            return {"name": platform["name"], "emoji": platform["emoji"], "url": url, "found": True}
-    except Exception:
-        return {"name": platform["name"], "emoji": platform["emoji"], "url": url, "found": False}
-
-
-@bot.tree.command(name="osint", description="🔍 Recherche OSINT sur un pseudo (réseaux sociaux, email, téléphone, adresse)")
-@discord.app_commands.describe(pseudo="Pseudo à rechercher", email="Email (optionnel)", telephone="Téléphone (optionnel)", adresse="Adresse (optionnel)")
-async def osint(interaction: discord.Interaction, pseudo: str, email: str = None, telephone: str = None, adresse: str = None):
-    await interaction.response.defer(ephemeral=True)
-    found_platforms = []
-    not_found_platforms = []
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
-    async with aiohttp.ClientSession(headers=headers) as session:
-        tasks = [check_platform(session, p, pseudo) for p in OSINT_PLATFORMS]
-        results = await asyncio.gather(*tasks)
-    for r in results:
-        (found_platforms if r["found"] else not_found_platforms).append(r)
-
-    embed = discord.Embed(title=f"🕵️ Rapport OSINT — `{pseudo}`", color=discord.Color.dark_red())
-    embed.set_footer(text=f"Slayzix Shop • OSINT • Demandé par {interaction.user.name}")
-    embed.timestamp = discord.utils.utcnow()
-
-    if found_platforms:
-        found_text = "\n".join([f"{p['emoji']} **[{p['name']}]({p['url']})**  ✅" for p in found_platforms])
-        embed.add_field(name=f"✅ Profils trouvés ({len(found_platforms)}/{len(OSINT_PLATFORMS)})", value=found_text, inline=False)
-    else:
-        embed.add_field(name="✅ Profils trouvés", value="❌ Aucun profil trouvé pour ce pseudo.", inline=False)
-
-    if not_found_platforms:
-        not_found_text = "  ".join([f"{p['emoji']} ~~{p['name']}~~" for p in not_found_platforms])
-        embed.add_field(name=f"❌ Non trouvé ({len(not_found_platforms)}/{len(OSINT_PLATFORMS)})", value=not_found_text, inline=False)
-
-    embed.add_field(name="​", value="──────────────────────", inline=False)
-
-    if email:
-        email_valid = bool(re.match(r"^[\w\.\+\-]+@[\w\-]+\.[a-zA-Z]{2,}$", email))
-        email_domain = email.split("@")[-1] if "@" in email else "?"
-        embed.add_field(name="📧 Email", value=f"📧 **Adresse :** `{email}`\n🌐 **Domaine :** `{email_domain}`\n✅ **Format valide :** {'Oui' if email_valid else 'Non'}\n🔗 [Google](https://www.google.com/search?q=%22{email}%22) | [HaveIBeenPwned](https://haveibeenpwned.com/account/{email})", inline=False)
-
-    if telephone:
-        phone_clean = re.sub(r"[\s\-\.\(\)]", "", telephone)
-        embed.add_field(name="📞 Téléphone", value=f"📞 **Numéro :** `{telephone}`\n🔗 [Google](https://www.google.com/search?q=%22{phone_clean}%22) | [NumLookup](https://www.numlookup.com/?number={phone_clean})", inline=False)
-
-    if adresse:
-        adresse_encoded = adresse.replace(" ", "+")
-        embed.add_field(name="🏠 Adresse", value=f"🏠 **Adresse :** `{adresse}`\n🔗 [Google Maps](https://www.google.com/maps/search/{adresse_encoded}) | [Google](https://www.google.com/search?q=%22{adresse_encoded}%22)", inline=False)
-
-    pseudo_encoded = pseudo.replace(" ", "+")
-    embed.add_field(name="🌐 Recherches globales", value=f"[Google](https://www.google.com/search?q=%22{pseudo_encoded}%22) | [Sherlock](https://sherlock-project.github.io/) | [WhatsMyName](https://whatsmyname.app/?q={pseudo})", inline=False)
-    embed.add_field(name="⚠️ Avertissement", value="*Ces données proviennent de sources **publiques** uniquement. Utilisation éthique et légale uniquement.*", inline=False)
-
-    await interaction.followup.send(embed=embed, ephemeral=True)
-
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # ================= ON READY =================
 
 @bot.event
 async def on_ready():
     await bot.tree.sync()
-    print(f"✅ {bot.user} connecté et slash commands synchronisées !")
-    print("🎵 Module music : OK")
-    print("🎫 Module tickets : OK")
-    print("🎉 Module giveaway : OK")
-    print("📝 Module vouch : OK")
-    print("🔍 Module OSINT : OK")
+    print(f"✅ {bot.user} connecté — Slash commands synchronisées !")
+    print("🎫 Ticket System : OK")
+    print("💳 PayPal Only  : OK")
+    print("🌍 FR / EN Lang : OK")
+    print("💳 PPL System   : OK")
+    print("📋 /help        : OK")
 
 
 # ================= START =================
 
 if __name__ == "__main__":
-    TOKEN = os.getenv("TOKEN")
+    TOKEN = "VOTRE_TOKEN_ICI"
     bot.run(TOKEN)
