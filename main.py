@@ -64,11 +64,11 @@ ppl_data: dict = load_ppl()  # { "user_id": { "email": str, "nom": str, "note": 
 # ================= TICKET TYPES =================
 
 TICKET_TYPES = [
-    discord.SelectOption(label="Nitro",        emoji="💎", description="Discord Nitro",      value="Nitro"),
-    discord.SelectOption(label="Server Boost", emoji="🚀",                  description="Server Boost",        value="Server Boost"),
-    discord.SelectOption(label="Decoration",   emoji="🎨",                  description="Profile Decoration",  value="Decoration"),
-    discord.SelectOption(label="Exchange",     emoji="🔄",                  description="Trade / Exchange",    value="Exchange"),
-    discord.SelectOption(label="Other",        emoji="📌",                  description="Other request",       value="Other"),
+    discord.SelectOption(label="Nitro",        emoji="<:Nitro:1480046132707987611>", description="Discord Nitro",      value="Nitro"),
+    discord.SelectOption(label="Server Boost", emoji="<:Boost:1480046746146050149>", description="Server Boost",        value="Server Boost"),
+    discord.SelectOption(label="Decoration",   emoji="<:Discord:1480047123188944906>", description="Profile Decoration",  value="Decoration"),
+    discord.SelectOption(label="Exchange",     emoji="<:Exchange:1480047481491427492>", description="Trade / Exchange",    value="Exchange"),
+    discord.SelectOption(label="Other",        emoji="<:Other:1480047561615085638>", description="Other request",       value="Other"),
 ]
 
 PAYMENT_OPTIONS = [
@@ -131,7 +131,7 @@ class TicketActionsView(discord.ui.View):
         close_btn = discord.ui.Button(label=m["close"], style=discord.ButtonStyle.danger, custom_id="ticket_close", row=0)
         claim_btn = discord.ui.Button(label=m["claim"], style=discord.ButtonStyle.success, custom_id="ticket_claim", row=0)
         unclaim_btn = discord.ui.Button(label=m["unclaim"], style=discord.ButtonStyle.secondary, custom_id="ticket_unclaim", row=0)
-        transcript_btn = discord.ui.Button(label=m["transcript"], style=discord.ButtonStyle.primary, custom_id="ticket_transcript", row=0)
+        transcript_btn = discord.ui.Button(label=m["transcript"], style=discord.ButtonStyle.primary, custom_id="ticket_transcript", emoji="<:Transcript:1480047021707759727>", row=0)
         ping_btn = discord.ui.Button(label=m["ping_staff"], style=discord.ButtonStyle.secondary, emoji="🔔", custom_id="ticket_ping_staff", row=1)
 
         close_btn.callback = self.close_callback
@@ -507,7 +507,7 @@ async def pplsave(ctx):
         def __init__(self):
             super().__init__(timeout=60)
 
-        @discord.ui.button(label="💳 Sauvegarder mon PayPal", style=discord.ButtonStyle.success, emoji="💾")
+        @discord.ui.button(label="Sauvegarder mon PayPal", style=discord.ButtonStyle.success, emoji="<:PPL:1480046672162852985>")
         async def open_modal(self, interaction: discord.Interaction, button: discord.ui.Button):
             if interaction.user.id != ctx.author.id:
                 return await interaction.response.send_message("❌ Ce bouton n'est pas pour toi.", ephemeral=True)
@@ -553,7 +553,7 @@ async def ppl(ctx):
         def __init__(self):
             super().__init__(timeout=None)
 
-        @discord.ui.button(label="📋 Copier le PayPal", style=discord.ButtonStyle.secondary, emoji="💳")
+        @discord.ui.button(label="Copier le PayPal", style=discord.ButtonStyle.secondary, emoji="<:PPL:1480046672162852985>")
         async def copy_ppl(self, interaction: discord.Interaction, button: discord.ui.Button):
             await interaction.response.send_message(
                 f"📋 **PayPal de {ctx.author.display_name} :**\n```{email}```\n*Clique sur l'email ci-dessus pour le copier !*",
@@ -561,7 +561,7 @@ async def ppl(ctx):
             )
 
     embed = discord.Embed(
-        title="💳 Informations PayPal",
+        title="<:PPL:1480046672162852985> Informations PayPal",
         color=discord.Color.from_rgb(0, 48, 135)
     )
     embed.set_author(
