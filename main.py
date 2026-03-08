@@ -780,7 +780,22 @@ vouch_config = {
     "role": None,
 }
 # Stocke le nombre de vouchs par user: { "staff_id": count }
-vouch_counts: dict = {}
+VOUCH_FILE = "vouch_data.json"
+
+def load_vouches() -> dict:
+    if os.path.exists(VOUCH_FILE):
+        try:
+            with open(VOUCH_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def save_vouches(data: dict):
+    with open(VOUCH_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+vouch_counts: dict = load_vouches()
 # Stocke les rôles milestone: { 1: role_id, 5: role_id, 10: role_id, ... }
 vouch_milestone_roles: dict = {}
 
@@ -838,6 +853,7 @@ async def vouch(interaction: discord.Interaction, rating: int, staff: discord.Me
     staff_id = str(staff.id)
     vouch_counts[staff_id] = vouch_counts.get(staff_id, 0) + 1
     staff_total = vouch_counts[staff_id]
+    save_vouches(vouch_counts)
 
     embed = discord.Embed(title="📝 New Review — Slayzix Shop", color=discord.Color.from_rgb(255, 0, 0))
     embed.add_field(name="👤 Customer", value=interaction.user.mention, inline=True)
