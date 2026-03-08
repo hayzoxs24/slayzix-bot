@@ -1063,7 +1063,7 @@ async def wearelegit(ctx):
     embed = discord.Embed(
         title="Slayzix Shop Legit? 🙏",
         description="<:oui:1480176155989508348> = Yes\n<:non:1480176175589621821> No = **Ban**",
-        color=discord.Color.red()
+        color=discord.Color.from_rgb(255, 0, 0)
     )
     embed.set_image(url="https://i.ibb.co/fdJxKj7c/BANNIERE.png")
     embed.timestamp = discord.utils.utcnow()
