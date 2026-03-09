@@ -192,6 +192,7 @@ class TicketActionsView(discord.ui.View):
         await interaction.response.send_message(embed=embed)
 
     async def unclaim_callback(self, interaction: discord.Interaction):
+        ticket_claimers.pop(interaction.channel.id, None)
         embed = discord.Embed(
             description=f"🔄 Ticket rendu par {interaction.user.mention}" if self.lang == "fr" else f"🔄 Ticket unclaimed by {interaction.user.mention}",
             color=discord.Color.from_rgb(255, 0, 0)
@@ -1382,6 +1383,277 @@ async def stats(ctx, member: discord.Member = None):
     embed.timestamp = discord.utils.utcnow()
 
     await ctx.send(embed=embed)
+
+
+
+# ================= TICKET UTILITY COMMANDS =================
+
+@bot.command(name="claim")
+@commands.has_permissions(manage_messages=True)
+async def claim_cmd(ctx):
+    """Claim un ticket via commande. Usage: *claim"""
+    await ctx.message.delete()
+    ticket_claimers[ctx.channel.id] = ctx.author.id
+    embed = discord.Embed(
+        description=f"✅ Ticket pris en charge par {ctx.author.mention}",
+        color=discord.Color.from_rgb(255, 0, 0)
+    )
+    await ctx.send(embed=embed)
+
+
+@bot.command(name="unclaim")
+@commands.has_permissions(manage_messages=True)
+async def unclaim_cmd(ctx):
+    """Unclaim un ticket via commande. Usage: *unclaim"""
+    await ctx.message.delete()
+    ticket_claimers.pop(ctx.channel.id, None)
+    embed = discord.Embed(
+        description=f"🔄 Ticket rendu par {ctx.author.mention}",
+        color=discord.Color.from_rgb(255, 0, 0)
+    )
+    await ctx.send(embed=embed)
+
+
+@bot.command(name="close")
+@commands.has_permissions(manage_messages=True)
+async def close_cmd(ctx):
+    """Ferme le ticket actuel. Usage: *close"""
+    await ctx.message.delete()
+    embed = discord.Embed(
+        description="🔒 Ticket en cours de fermeture...",
+        color=discord.Color.from_rgb(255, 0, 0)
+    )
+    await ctx.send(embed=embed)
+    if ticket_config["log_channel"]:
+        lc = ctx.guild.get_channel(ticket_config["log_channel"])
+        if lc:
+            e = discord.Embed(
+                title="📋 Ticket fermé",
+                description=f"**Salon :** {ctx.channel.name}
+**Par :** {ctx.author.mention}",
+                color=discord.Color.from_rgb(255, 0, 0)
+            )
+            e.timestamp = discord.utils.utcnow()
+            await lc.send(embed=e)
+    for uid, cid in list(open_tickets.items()):
+        if cid == ctx.channel.id:
+            del open_tickets[uid]
+            break
+    await asyncio.sleep(5)
+    await ctx.channel.delete()
+
+
+@bot.command(name="add")
+@commands.has_permissions(manage_messages=True)
+async def add_cmd(ctx, member: discord.Member):
+    """Ajoute un membre dans le ticket. Usage: *add @membre"""
+    await ctx.message.delete()
+    await ctx.channel.set_permissions(member, read_messages=True, send_messages=True)
+    embed = discord.Embed(
+        description=f"✅ {member.mention} a été ajouté au ticket.",
+        color=discord.Color.from_rgb(255, 0, 0)
+    )
+    await ctx.send(embed=embed, delete_after=8)
+
+
+@bot.command(name="remove")
+@commands.has_permissions(manage_messages=True)
+async def remove_cmd(ctx, member: discord.Member):
+    """Retire un membre du ticket. Usage: *remove @membre"""
+    await ctx.message.delete()
+    await ctx.channel.set_permissions(member, overwrite=None)
+    embed = discord.Embed(
+        description=f"❌ {member.mention} a été retiré du ticket.",
+        color=discord.Color.from_rgb(255, 0, 0)
+    )
+    await ctx.send(embed=embed, delete_after=8)
+
+
+@bot.command(name="rename")
+@commands.has_permissions(manage_messages=True)
+async def rename_cmd(ctx, *, name: str):
+    """Renomme le salon du ticket. Usage: *rename nouveau-nom"""
+    await ctx.message.delete()
+    old_name = ctx.channel.name
+    await ctx.channel.edit(name=name)
+    embed = discord.Embed(
+        description=f"✏️ Salon renommé : `{old_name}` → `{name}`",
+        color=discord.Color.from_rgb(255, 0, 0)
+    )
+    await ctx.send(embed=embed, delete_after=8)
+
+
+@bot.command(name="slowmode")
+@commands.has_permissions(manage_messages=True)
+async def slowmode_cmd(ctx, seconds: int = 0):
+    """Active le slowmode dans le ticket. Usage: *slowmode 5"""
+    await ctx.message.delete()
+    await ctx.channel.edit(slowmode_delay=seconds)
+    msg = f"⏱️ Slowmode désactivé." if seconds == 0 else f"⏱️ Slowmode réglé à **{seconds}s**."
+    embed = discord.Embed(description=msg, color=discord.Color.from_rgb(255, 0, 0))
+    await ctx.send(embed=embed, delete_after=8)
+
+# ================= *FINISH COMMAND =================
+
+class FinishButtonView(discord.ui.View):
+    def __init__(self, claimer: discord.Member):
+        super().__init__(timeout=None)
+        self.claimer = claimer
+
+        btn = discord.ui.Button(
+            label="Finish",
+            style=discord.ButtonStyle.secondary,
+            emoji="<:oui:1480176155989508348>",
+            custom_id=f"finish_standalone_{claimer.id}"
+        )
+        btn.callback = self.finish_callback
+        self.add_item(btn)
+
+    async def finish_callback(self, interaction: discord.Interaction):
+        class VouchModal(discord.ui.Modal, title="⭐ Leave a Review"):
+            rating_input = discord.ui.TextInput(
+                label="Rating (1 to 5)",
+                placeholder="5",
+                max_length=1,
+                required=True
+            )
+            service_input = discord.ui.TextInput(
+                label="Service purchased",
+                placeholder="e.g. Nitro Basic",
+                required=True,
+                max_length=100
+            )
+            comment_input = discord.ui.TextInput(
+                label="Comment",
+                placeholder="Fast, legit, great service...",
+                style=discord.TextStyle.long,
+                required=True,
+                max_length=500
+            )
+
+            def __init__(self_, claimer_member):
+                super().__init__()
+                self_.claimer_member = claimer_member
+
+            async def on_submit(self_, modal_interaction: discord.Interaction):
+                try:
+                    rating = int(self_.rating_input.value.strip())
+                    if rating < 1 or rating > 5:
+                        return await modal_interaction.response.send_message("❌ Rating must be between 1 and 5.", ephemeral=True)
+                except ValueError:
+                    return await modal_interaction.response.send_message("❌ Rating must be a number.", ephemeral=True)
+
+                staff = self_.claimer_member
+                service = self_.service_input.value.strip()
+                comment = self_.comment_input.value.strip()
+                stars = "⭐" * rating + "🌑" * (5 - rating)
+                badges = {1: "😡 Very bad", 2: "😕 Bad", 3: "😐 Average", 4: "😊 Good", 5: "🤩 Excellent!"}
+
+                staff_id = str(staff.id)
+                vouch_counts[staff_id] = vouch_counts.get(staff_id, 0) + 1
+                staff_total = vouch_counts[staff_id]
+                save_vouches(vouch_counts)
+
+                embed = discord.Embed(title="📝 New Review — Slayzix Shop", color=discord.Color.from_rgb(255, 0, 0))
+                embed.add_field(name="👤 Customer", value=modal_interaction.user.mention, inline=True)
+                embed.add_field(name="🛠️ Staff", value=staff.mention, inline=True)
+                embed.add_field(name="📦 Service", value=f"**{service}**", inline=True)
+                embed.add_field(name="⭐ Rating", value=f"{stars}  `{rating}/5` — {badges[rating]}", inline=False)
+                embed.add_field(name="💬 Comment", value=f"*{comment}*", inline=False)
+                embed.add_field(name="🏆 Staff Vouches", value=f"`{staff_total}` vouch(s) total", inline=False)
+                embed.set_thumbnail(url=modal_interaction.user.display_avatar.url)
+                embed.set_footer(text="Slayzix Shop • Thank you for your review!")
+                embed.timestamp = discord.utils.utcnow()
+
+                # Rôle auto +X vouch
+                new_role_name = f"+{staff_total} vouch"
+                existing_role = discord.utils.get(modal_interaction.guild.roles, name=new_role_name)
+                if not existing_role:
+                    try:
+                        existing_role = await modal_interaction.guild.create_role(
+                            name=new_role_name,
+                            color=discord.Color.from_rgb(255, 0, 0),
+                            reason=f"Vouch auto-role: {staff_total} vouches"
+                        )
+                        admin_roles = [r for r in modal_interaction.guild.roles if r.permissions.administrator and r != modal_interaction.guild.default_role]
+                        if admin_roles:
+                            lowest_admin = min(admin_roles, key=lambda r: r.position)
+                            try:
+                                await existing_role.edit(position=max(1, lowest_admin.position - 1))
+                            except Exception:
+                                pass
+                    except discord.Forbidden:
+                        existing_role = None
+
+                if staff_total > 1:
+                    old_role = discord.utils.get(modal_interaction.guild.roles, name=f"+{staff_total - 1} vouch")
+                    if old_role and old_role in staff.roles:
+                        try:
+                            await staff.remove_roles(old_role)
+                        except discord.Forbidden:
+                            pass
+
+                if existing_role and existing_role not in staff.roles:
+                    try:
+                        await staff.add_roles(existing_role)
+                    except discord.Forbidden:
+                        pass
+
+                if vouch_config["role"]:
+                    base_role = modal_interaction.guild.get_role(vouch_config["role"])
+                    if base_role and base_role not in modal_interaction.user.roles:
+                        try:
+                            await modal_interaction.user.add_roles(base_role)
+                        except discord.Forbidden:
+                            pass
+
+                if vouch_config["channel"]:
+                    ch = modal_interaction.guild.get_channel(vouch_config["channel"])
+                    if ch:
+                        await ch.send(embed=embed)
+
+                await modal_interaction.response.send_message("✅ Review submitted! Thank you 🙏", ephemeral=True)
+
+        await interaction.response.send_modal(VouchModal(self.claimer))
+
+
+@bot.command(name="finish")
+@commands.has_permissions(manage_messages=True)
+async def finish_cmd(ctx, staff: discord.Member = None):
+    """Envoie un embed avec le bouton Finish. Usage: *finish @staff"""
+    await ctx.message.delete()
+
+    # Si pas de staff mentionné, cherche le claimer du ticket
+    if not staff:
+        claimer_id = ticket_claimers.get(ctx.channel.id)
+        staff = ctx.guild.get_member(claimer_id) if claimer_id else None
+
+    if not staff:
+        return await ctx.send(
+            embed=discord.Embed(
+                description="❌ Mentionne un staff : `*finish @staff`",
+                color=discord.Color.from_rgb(255, 0, 0)
+            ),
+            delete_after=8
+        )
+
+    embed = discord.Embed(
+        title="✅ Transaction terminée !",
+        description=(
+            f"Merci d'avoir choisi **Slayzix Shop** !
+
+"
+            f"🛠️ Staff : {staff.mention}
+
+"
+            f"Clique sur le bouton ci-dessous pour laisser ton avis ⭐"
+        ),
+        color=discord.Color.from_rgb(255, 0, 0)
+    )
+    embed.set_footer(text="Slayzix Shop • Merci pour ta confiance !")
+    embed.timestamp = discord.utils.utcnow()
+
+    await ctx.send(embed=embed, view=FinishButtonView(staff))
 
 # ================= ON READY =================
 
