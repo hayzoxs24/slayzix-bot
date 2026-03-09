@@ -81,6 +81,7 @@ TICKET_TYPES = [
 
 PAYMENT_OPTIONS = [
     discord.SelectOption(label="PayPal",       emoji="<:PPL:1480046672162852985>",  description="Pay via PayPal",  value="PayPal"),
+    discord.SelectOption(label="LTC",          emoji="<:LTC:1480634361555452176>",  description="Pay via Litecoin", value="LTC"),
 ]
 
 LANG_OPTIONS = [
@@ -796,6 +797,158 @@ async def ppldelete(ctx):
         delete_after=8
     )
 
+
+
+
+# ================= LTC COMMANDS =================
+
+LTC_FILE = "ltc_data.json"
+
+def load_ltc() -> dict:
+    if os.path.exists(LTC_FILE):
+        try:
+            with open(LTC_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def save_ltc(data: dict):
+    with open(LTC_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+ltc_data: dict = load_ltc()
+
+
+class LTCSaveModal(discord.ui.Modal, title="🪙 Sauvegarder mon adresse LTC"):
+    address = discord.ui.TextInput(
+        label="Adresse LTC (Litecoin)",
+        placeholder="LxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxX",
+        required=True,
+        max_length=100
+    )
+    note = discord.ui.TextInput(
+        label="Note / Info supplémentaire (optionnel)",
+        placeholder="Ex: Wallet principal...",
+        required=False,
+        max_length=300,
+        style=discord.TextStyle.long
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        uid = str(interaction.user.id)
+        ltc_data[uid] = {
+            "address": self.address.value.strip(),
+            "note": self.note.value.strip() if self.note.value else "",
+            "updated_at": datetime.utcnow().strftime("%d/%m/%Y %H:%M"),
+        }
+        save_ltc(ltc_data)
+        await interaction.response.send_message(
+            embed=discord.Embed(
+                title="✅ LTC sauvegardé !",
+                description="Ton adresse LTC a bien été enregistrée.\nUtilise `*ltc` pour l'afficher.",
+                color=discord.Color.from_rgb(255, 0, 0)
+            ),
+            ephemeral=True
+        )
+
+
+@bot.command(name="ltcsave")
+async def ltcsave(ctx):
+    """Ouvre le formulaire pour sauvegarder son adresse LTC."""
+
+    class LTCSaveView(discord.ui.View):
+        def __init__(self):
+            super().__init__(timeout=60)
+
+        @discord.ui.button(label="Sauvegarder mon LTC", style=discord.ButtonStyle.secondary, emoji="<:LTC:1480634361555452176>")
+        async def open_modal(self, interaction: discord.Interaction, button: discord.ui.Button):
+            if interaction.user.id != ctx.author.id:
+                return await interaction.response.send_message("❌ Ce bouton n'est pas pour toi.", ephemeral=True)
+            await interaction.response.send_modal(LTCSaveModal())
+
+    embed = discord.Embed(
+        title="<:LTC:1480634361555452176> Sauvegarde adresse LTC",
+        description=(
+            "Clique sur le bouton ci-dessous pour enregistrer ton adresse Litecoin.\n\n"
+            "📌 Ces informations seront affichées quand tu utiliseras `*ltc`.\n"
+            "🔒 Seul toi peut modifier tes données."
+        ),
+        color=discord.Color.from_rgb(255, 0, 0)
+    )
+    embed.set_thumbnail(url=ctx.author.display_avatar.url)
+    embed.set_footer(text="Tes données sont stockées localement sur le bot.")
+    await ctx.message.delete()
+    await ctx.send(embed=embed, view=LTCSaveView())
+
+
+@bot.command(name="ltc")
+async def ltc_cmd(ctx):
+    """Affiche l'adresse LTC de la personne — visible par tous, jamais supprimé."""
+    uid = str(ctx.author.id)
+    await ctx.message.delete()
+
+    if uid not in ltc_data or not ltc_data[uid].get("address"):
+        embed = discord.Embed(
+            title="❌ Aucun LTC enregistré",
+            description=(
+                f"{ctx.author.mention}, tu n'as pas encore sauvegardé ton adresse LTC.\n\n"
+                "Utilise `*ltcsave` pour enregistrer ton adresse Litecoin."
+            ),
+            color=discord.Color.from_rgb(255, 0, 0)
+        )
+        embed.set_thumbnail(url=ctx.author.display_avatar.url)
+        return await ctx.send(embed=embed, delete_after=10)
+
+    data = ltc_data[uid]
+    address = data["address"]
+
+    class CopyLTCView(discord.ui.View):
+        def __init__(self):
+            super().__init__(timeout=None)
+
+        @discord.ui.button(label="Copier l'adresse LTC", style=discord.ButtonStyle.secondary, emoji="<:LTC:1480634361555452176>")
+        async def copy_ltc(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await interaction.response.send_message(
+                f"📋 **LTC de {ctx.author.display_name} :**\n```{address}```\n*Clique sur l'adresse ci-dessus pour la copier !*",
+                ephemeral=True
+            )
+
+    embed = discord.Embed(
+        title="<:LTC:1480634361555452176> Adresse LTC",
+        color=discord.Color.from_rgb(255, 0, 0)
+    )
+    embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.display_avatar.url)
+    embed.add_field(name="🪙 Adresse Litecoin", value=f"```{address}```", inline=False)
+    embed.add_field(name="🕐 Dernière mise à jour", value=f"`{data.get('updated_at', 'Inconnu')}`", inline=True)
+    if data.get("note"):
+        embed.add_field(name="📝 Note", value=data["note"], inline=False)
+    embed.set_footer(text=f"LTC de {ctx.author.name} • Utilise *ltcsave pour modifier")
+    embed.timestamp = discord.utils.utcnow()
+
+    await ctx.send(embed=embed, view=CopyLTCView())
+
+
+@bot.command(name="ltcdelete")
+async def ltcdelete(ctx):
+    """Supprime le LTC sauvegardé de la personne."""
+    uid = str(ctx.author.id)
+    await ctx.message.delete()
+    if uid not in ltc_data:
+        return await ctx.send(
+            embed=discord.Embed(description="❌ Aucun LTC à supprimer.", color=discord.Color.from_rgb(255, 0, 0)),
+            delete_after=8
+        )
+    del ltc_data[uid]
+    save_ltc(ltc_data)
+    await ctx.send(
+        embed=discord.Embed(
+            title="🗑️ LTC supprimé",
+            description="Ton adresse LTC a été supprimée avec succès.",
+            color=discord.Color.from_rgb(255, 0, 0)
+        ),
+        delete_after=8
+    )
 
 # ================= /HELP =================
 
