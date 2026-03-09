@@ -1429,8 +1429,7 @@ async def close_cmd(ctx):
         if lc:
             e = discord.Embed(
                 title="📋 Ticket fermé",
-                description=f"**Salon :** {ctx.channel.name}
-**Par :** {ctx.author.mention}",
+                description=f"**Salon :** {ctx.channel.name}\n**Par :** {ctx.author.mention}",
                 color=discord.Color.from_rgb(255, 0, 0)
             )
             e.timestamp = discord.utils.utcnow()
@@ -1640,12 +1639,8 @@ async def finish_cmd(ctx, staff: discord.Member = None):
     embed = discord.Embed(
         title="✅ Transaction terminée !",
         description=(
-            f"Merci d'avoir choisi **Slayzix Shop** !
-
-"
-            f"🛠️ Staff : {staff.mention}
-
-"
+            f"Merci d'avoir choisi **Slayzix Shop** !\n\n"
+            f"🛠️ Staff : {staff.mention}\n\n"
             f"Clique sur le bouton ci-dessous pour laisser ton avis ⭐"
         ),
         color=discord.Color.from_rgb(255, 0, 0)
