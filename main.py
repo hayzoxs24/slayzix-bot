@@ -1823,14 +1823,6 @@ async def on_ready():
 
 # ================= START =================
 
-if __name__ == "__main__":
-    import os
-    TOKEN = os.environ.get("DISCORD_TOKEN")
-    if not TOKEN:
-        raise ValueError("❌ TOKEN introuvable ! Ajoute la variable d'environnement DISCORD_TOKEN sur Railway.")
-    bot.run(TOKEN)
-
-
 # ================= TOS =================
 
 TOS_FR = """📋 **Slayzix Shop — Conditions Générales de Vente (CGV)**
@@ -2319,3 +2311,12 @@ async def serverinfo_cmd(ctx):
     embed.add_field(name="🚀 Boosts", value=f"`{g.premium_subscription_count}`", inline=True)
     embed.set_footer(text=f"ID: {g.id}")
     await ctx.send(embed=embed)
+
+
+
+if __name__ == "__main__":
+    import os
+    TOKEN = os.environ.get("DISCORD_TOKEN")
+    if not TOKEN:
+        raise ValueError("❌ TOKEN introuvable ! Ajoute la variable d'environnement DISCORD_TOKEN sur Railway.")
+    bot.run(TOKEN)
