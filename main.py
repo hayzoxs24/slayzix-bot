@@ -1829,3 +1829,493 @@ if __name__ == "__main__":
     if not TOKEN:
         raise ValueError("❌ TOKEN introuvable ! Ajoute la variable d'environnement DISCORD_TOKEN sur Railway.")
     bot.run(TOKEN)
+
+
+# ================= TOS =================
+
+TOS_FR = """📋 **Slayzix Shop — Conditions Générales de Vente (CGV)**
+
+En achetant un produit ou service chez **Slayzix Shop**, vous acceptez automatiquement les conditions suivantes.
+
+**1. Politique de Remboursement**
+Tous les paiements sont définitifs. Une fois le paiement effectué, aucun remboursement ne sera accordé.
+
+**2. Politique Anti-Spam**
+Spammer dans les tickets ou en DM = aucun produit.
+Si vous spammez le staff, votre commande peut être annulée sans remboursement.
+
+**3. Respect du Staff**
+Les clients doivent rester respectueux et patients avec les membres du staff. Tout comportement toxique peut entraîner un bannissement ou l'annulation du service.
+
+**4. Délai de Livraison**
+Le délai de livraison peut varier selon le produit ou service. Veuillez être patient pendant l'attente de votre commande.
+
+**5. Responsabilité du Client**
+Les clients doivent fournir les informations correctes nécessaires à la commande. Nous ne sommes pas responsables des erreurs commises par le client.
+
+**6. Stock**
+Certains produits peuvent être temporairement indisponibles. Si un produit est en rupture de stock, vous devrez attendre le prochain réapprovisionnement.
+
+**7. Vouchs**
+Après réception de votre commande, veuillez laisser un vouch dans le salon vouch pour soutenir la boutique.
+
+**8. Modification des CGV**
+L'équipe de Slayzix Shop se réserve le droit de modifier ces Conditions Générales de Vente à tout moment.
+
+Merci de faire confiance à **Slayzix Shop** 🤝"""
+
+TOS_EN = """📋 **Slayzix Shop — Terms of Service (TOS)**
+
+By purchasing any product or service from **Slayzix Shop**, you automatically agree to the following Terms of Service.
+
+**1. No Refund Policy**
+All payments are final. Once the payment is completed, no refunds will be given.
+
+**2. Spam Policy**
+Spamming in tickets or DMs = no product.
+If you spam staff, your order may be cancelled without refund.
+
+**3. Respect Staff**
+Customers must remain respectful and patient with staff members. Any toxic behavior may result in a ban or cancellation of the service.
+
+**4. Delivery Time**
+Delivery time may vary depending on the product or service. Please be patient while waiting for your order.
+
+**5. Customer Responsibility**
+Customers must provide the correct information needed for the order. We are not responsible for mistakes made by the customer.
+
+**6. Stock**
+Some products may be temporarily unavailable. If a product is out of stock, you will need to wait until the next restock.
+
+**7. Vouches**
+After receiving your order, please leave a vouch in the vouch channel to support the shop.
+
+**8. TOS Changes**
+The Slayzix Shop staff team reserves the right to modify these Terms of Service at any time.
+
+Thank you for trusting **Slayzix Shop** 🤝"""
+
+BANNER_URL = "https://i.ibb.co/fdJxKj7c/BANNIERE.png"
+
+class TOSView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="🇫🇷 Français", style=discord.ButtonStyle.secondary, custom_id="tos_fr")
+    async def tos_fr(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="📋 Slayzix Shop — CGV",
+            description=TOS_FR,
+            color=discord.Color.from_rgb(255, 0, 0)
+        )
+        embed.set_image(url=BANNER_URL)
+        embed.set_footer(text="Slayzix Shop • CGV")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @discord.ui.button(label="🇬🇧 English", style=discord.ButtonStyle.secondary, custom_id="tos_en")
+    async def tos_en(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="📋 Slayzix Shop — TOS",
+            description=TOS_EN,
+            color=discord.Color.from_rgb(255, 0, 0)
+        )
+        embed.set_image(url=BANNER_URL)
+        embed.set_footer(text="Slayzix Shop • TOS")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+@bot.command(name="tos")
+@commands.has_permissions(administrator=True)
+async def tos_cmd(ctx):
+    """Envoie le panel TOS avec boutons FR/EN."""
+    await ctx.message.delete()
+    embed = discord.Embed(
+        title="📋 Slayzix Shop — Terms of Service / CGV",
+        description=(
+            "Cliquez sur votre langue pour lire les conditions générales.\n"
+            "Click your language to read the terms of service."
+        ),
+        color=discord.Color.from_rgb(255, 0, 0)
+    )
+    embed.set_image(url=BANNER_URL)
+    embed.set_footer(text="Slayzix Shop • TOS / CGV")
+    await ctx.send(embed=embed, view=TOSView())
+
+
+# ================= PREFIX COMMAND =================
+
+@bot.command(name="prefix")
+@commands.has_permissions(administrator=True)
+async def prefix_cmd(ctx, new_prefix: str):
+    """Change le préfixe du bot. Usage: *prefix !"""
+    await ctx.message.delete()
+    bot.command_prefix = new_prefix
+    embed = discord.Embed(
+        title="⚙️ Préfixe mis à jour",
+        description=f"Le nouveau préfixe est : `{new_prefix}`",
+        color=discord.Color.from_rgb(255, 0, 0)
+    )
+    await ctx.send(embed=embed, delete_after=8)
+
+
+# ================= PROTECTION ANTI-SPAM =================
+
+import time as time_module
+from collections import defaultdict
+
+spam_tracker = defaultdict(list)   # user_id -> [timestamps]
+warned_users = set()               # user_ids déjà avertis
+
+SPAM_LIMIT    = 5    # messages
+SPAM_WINDOW   = 4    # secondes
+MUTE_DURATION = 300  # secondes (5 min)
+
+protection_enabled = True
+protection_config = {
+    "anti_spam": True,
+    "anti_invite": True,
+    "anti_mention_mass": True,
+    "mention_limit": 5,
+    "log_channel": None,
+}
+
+
+async def log_protection(guild, action: str, member: discord.Member, reason: str):
+    if protection_config["log_channel"]:
+        ch = guild.get_channel(protection_config["log_channel"])
+        if ch:
+            e = discord.Embed(
+                title=f"🛡️ Protection — {action}",
+                description=f"**Membre :** {member.mention}\n**Raison :** {reason}",
+                color=discord.Color.from_rgb(255, 0, 0)
+            )
+            e.timestamp = discord.utils.utcnow()
+            await ch.send(embed=e)
+
+
+@bot.listen("on_message")
+async def protection_listener(message: discord.Message):
+    if not protection_enabled:
+        return
+    if not message.guild or message.author.bot:
+        return
+    member = message.guild.get_member(message.author.id)
+    if not member:
+        return
+    # Ignore admins
+    if member.guild_permissions.administrator:
+        return
+
+    now = time_module.time()
+    uid = message.author.id
+
+    # --- Anti-Spam ---
+    if protection_config["anti_spam"]:
+        spam_tracker[uid] = [t for t in spam_tracker[uid] if now - t < SPAM_WINDOW]
+        spam_tracker[uid].append(now)
+        if len(spam_tracker[uid]) >= SPAM_LIMIT:
+            spam_tracker[uid] = []
+            # Timeout 5 min
+            try:
+                until = discord.utils.utcnow() + discord.timedelta(seconds=MUTE_DURATION)
+                await member.timeout(until, reason="Anti-spam automatique")
+                if uid not in warned_users:
+                    warned_users.add(uid)
+                    await message.channel.send(
+                        embed=discord.Embed(
+                            description=f"⏱️ {member.mention} a été mis en timeout **5 min** pour spam.",
+                            color=discord.Color.from_rgb(255, 0, 0)
+                        ),
+                        delete_after=10
+                    )
+                await log_protection(message.guild, "Anti-Spam", member, f"Spam détecté ({SPAM_LIMIT} msg/{SPAM_WINDOW}s)")
+            except discord.Forbidden:
+                pass
+            return
+
+    # --- Anti-Invite Discord ---
+    if protection_config["anti_invite"]:
+        if "discord.gg/" in message.content or "discord.com/invite/" in message.content:
+            try:
+                await message.delete()
+                await message.channel.send(
+                    embed=discord.Embed(
+                        description=f"🚫 {member.mention} Les liens d'invitation Discord sont interdits !",
+                        color=discord.Color.from_rgb(255, 0, 0)
+                    ),
+                    delete_after=8
+                )
+                await log_protection(message.guild, "Anti-Invite", member, "Lien d'invitation Discord posté")
+            except discord.Forbidden:
+                pass
+            return
+
+    # --- Anti-Mention Mass ---
+    if protection_config["anti_mention_mass"]:
+        mention_count = len(message.mentions) + len(message.role_mentions)
+        if mention_count >= protection_config["mention_limit"]:
+            try:
+                await message.delete()
+                until = discord.utils.utcnow() + discord.timedelta(seconds=MUTE_DURATION)
+                await member.timeout(until, reason="Anti-mention de masse")
+                await message.channel.send(
+                    embed=discord.Embed(
+                        description=f"🚫 {member.mention} Mention de masse interdite — timeout 5 min.",
+                        color=discord.Color.from_rgb(255, 0, 0)
+                    ),
+                    delete_after=10
+                )
+                await log_protection(message.guild, "Anti-Mention", member, f"{mention_count} mentions détectées")
+            except discord.Forbidden:
+                pass
+
+
+@bot.command(name="protect")
+@commands.has_permissions(administrator=True)
+async def protect_cmd(ctx, action: str = "status"):
+    """Gère la protection du serveur. Usage: *protect on/off/status/setlog #salon"""
+    await ctx.message.delete()
+    global protection_enabled
+
+    if action == "on":
+        protection_enabled = True
+        desc = "✅ Protection **activée**."
+    elif action == "off":
+        protection_enabled = False
+        desc = "⛔ Protection **désactivée**."
+    elif action == "status":
+        desc = (
+            f"🛡️ Protection : {'✅ ON' if protection_enabled else '⛔ OFF'}\n"
+            f"• Anti-Spam : {'✅' if protection_config['anti_spam'] else '❌'} ({SPAM_LIMIT} msg / {SPAM_WINDOW}s → timeout {MUTE_DURATION}s)\n"
+            f"• Anti-Invite : {'✅' if protection_config['anti_invite'] else '❌'}\n"
+            f"• Anti-Mention : {'✅' if protection_config['anti_mention_mass'] else '❌'} (limit: {protection_config['mention_limit']} mentions)\n"
+            f"• Log : {'<#' + str(protection_config['log_channel']) + '>' if protection_config['log_channel'] else '❌ Non configuré'}"
+        )
+    else:
+        desc = "❓ Usage : `*protect on` / `*protect off` / `*protect status`"
+
+    await ctx.send(embed=discord.Embed(
+        title="🛡️ Protection Slayzix",
+        description=desc,
+        color=discord.Color.from_rgb(255, 0, 0)
+    ), delete_after=15)
+
+
+@bot.command(name="protectlog")
+@commands.has_permissions(administrator=True)
+async def protectlog_cmd(ctx, channel: discord.TextChannel):
+    """Configure le salon de log de la protection. Usage: *protectlog #salon"""
+    await ctx.message.delete()
+    protection_config["log_channel"] = channel.id
+    await ctx.send(embed=discord.Embed(
+        description=f"✅ Logs de protection → {channel.mention}",
+        color=discord.Color.from_rgb(255, 0, 0)
+    ), delete_after=8)
+
+
+# ================= DM ALL =================
+
+@bot.command(name="dmall")
+@commands.has_permissions(administrator=True)
+async def dmall_cmd(ctx, *, message: str):
+    """DM tous les membres du serveur. Usage: *dmall <message>"""
+    await ctx.message.delete()
+    members = [m for m in ctx.guild.members if not m.bot]
+    confirm = await ctx.send(embed=discord.Embed(
+        title="📨 DM All — Confirmation",
+        description=f"Tu vas envoyer ce message à **{len(members)} membres** :\n\n*{message}*\n\nRéponds `oui` pour confirmer.",
+        color=discord.Color.from_rgb(255, 0, 0)
+    ))
+
+    def check(m):
+        return m.author == ctx.author and m.channel == ctx.channel and m.content.lower() == "oui"
+
+    try:
+        await bot.wait_for("message", check=check, timeout=30)
+    except asyncio.TimeoutError:
+        await confirm.delete()
+        return await ctx.send(embed=discord.Embed(description="❌ DM All annulé (timeout).", color=discord.Color.from_rgb(255, 0, 0)), delete_after=5)
+
+    await confirm.delete()
+    progress = await ctx.send(embed=discord.Embed(description="📨 Envoi en cours...", color=discord.Color.from_rgb(255, 0, 0)))
+
+    success, failed = 0, 0
+    embed_dm = discord.Embed(
+        title=f"📨 Message de Slayzix Shop",
+        description=message,
+        color=discord.Color.from_rgb(255, 0, 0)
+    )
+    embed_dm.set_footer(text="Slayzix Shop")
+    embed_dm.set_thumbnail(url=ctx.guild.icon.url if ctx.guild.icon else None)
+    embed_dm.timestamp = discord.utils.utcnow()
+
+    for member in members:
+        try:
+            await member.send(embed=embed_dm)
+            success += 1
+        except Exception:
+            failed += 1
+        await asyncio.sleep(0.5)  # Évite le rate limit
+
+    await progress.edit(embed=discord.Embed(
+        title="✅ DM All terminé",
+        description=f"✅ Envoyé : **{success}**\n❌ Échec : **{failed}**",
+        color=discord.Color.from_rgb(255, 0, 0)
+    ))
+
+
+# ================= COMMANDES UTILITAIRES BONUS =================
+
+@bot.command(name="clear")
+@commands.has_permissions(manage_messages=True)
+async def clear_cmd(ctx, amount: int = 10):
+    """Supprime X messages. Usage: *clear 10"""
+    await ctx.message.delete()
+    deleted = await ctx.channel.purge(limit=amount)
+    await ctx.send(embed=discord.Embed(
+        description=f"🗑️ **{len(deleted)}** messages supprimés.",
+        color=discord.Color.from_rgb(255, 0, 0)
+    ), delete_after=5)
+
+
+@bot.command(name="ban")
+@commands.has_permissions(ban_members=True)
+async def ban_cmd(ctx, member: discord.Member, *, reason: str = "Aucune raison"):
+    """Bannit un membre. Usage: *ban @membre raison"""
+    await ctx.message.delete()
+    await member.ban(reason=reason)
+    await ctx.send(embed=discord.Embed(
+        title="🔨 Membre banni",
+        description=f"**{member}** a été banni.\n**Raison :** {reason}",
+        color=discord.Color.from_rgb(255, 0, 0)
+    ), delete_after=10)
+
+
+@bot.command(name="kick")
+@commands.has_permissions(kick_members=True)
+async def kick_cmd(ctx, member: discord.Member, *, reason: str = "Aucune raison"):
+    """Kick un membre. Usage: *kick @membre raison"""
+    await ctx.message.delete()
+    await member.kick(reason=reason)
+    await ctx.send(embed=discord.Embed(
+        title="👢 Membre kick",
+        description=f"**{member}** a été kick.\n**Raison :** {reason}",
+        color=discord.Color.from_rgb(255, 0, 0)
+    ), delete_after=10)
+
+
+@bot.command(name="mute")
+@commands.has_permissions(moderate_members=True)
+async def mute_cmd(ctx, member: discord.Member, duration: int = 10, *, reason: str = "Aucune raison"):
+    """Mute un membre X minutes. Usage: *mute @membre 10 raison"""
+    await ctx.message.delete()
+    until = discord.utils.utcnow() + discord.timedelta(minutes=duration)
+    await member.timeout(until, reason=reason)
+    await ctx.send(embed=discord.Embed(
+        title="🔇 Membre muté",
+        description=f"**{member.mention}** muté **{duration} min**.\n**Raison :** {reason}",
+        color=discord.Color.from_rgb(255, 0, 0)
+    ), delete_after=10)
+
+
+@bot.command(name="unmute")
+@commands.has_permissions(moderate_members=True)
+async def unmute_cmd(ctx, member: discord.Member):
+    """Unmute un membre. Usage: *unmute @membre"""
+    await ctx.message.delete()
+    await member.timeout(None)
+    await ctx.send(embed=discord.Embed(
+        description=f"🔊 {member.mention} a été unmute.",
+        color=discord.Color.from_rgb(255, 0, 0)
+    ), delete_after=8)
+
+
+@bot.command(name="unban")
+@commands.has_permissions(ban_members=True)
+async def unban_cmd(ctx, user_id: int):
+    """Unban un membre via son ID. Usage: *unban 123456789"""
+    await ctx.message.delete()
+    user = await bot.fetch_user(user_id)
+    await ctx.guild.unban(user)
+    await ctx.send(embed=discord.Embed(
+        description=f"✅ **{user}** a été unban.",
+        color=discord.Color.from_rgb(255, 0, 0)
+    ), delete_after=8)
+
+
+@bot.command(name="lock")
+@commands.has_permissions(manage_channels=True)
+async def lock_cmd(ctx):
+    """Verrouille le salon actuel. Usage: *lock"""
+    await ctx.message.delete()
+    await ctx.channel.set_permissions(ctx.guild.default_role, send_messages=False)
+    await ctx.send(embed=discord.Embed(
+        description="🔒 Salon **verrouillé**.",
+        color=discord.Color.from_rgb(255, 0, 0)
+    ), delete_after=8)
+
+
+@bot.command(name="unlock")
+@commands.has_permissions(manage_channels=True)
+async def unlock_cmd(ctx):
+    """Déverrouille le salon actuel. Usage: *unlock"""
+    await ctx.message.delete()
+    await ctx.channel.set_permissions(ctx.guild.default_role, send_messages=True)
+    await ctx.send(embed=discord.Embed(
+        description="🔓 Salon **déverrouillé**.",
+        color=discord.Color.from_rgb(255, 0, 0)
+    ), delete_after=8)
+
+
+@bot.command(name="announce")
+@commands.has_permissions(administrator=True)
+async def announce_cmd(ctx, channel: discord.TextChannel, *, message: str):
+    """Envoie une annonce dans un salon. Usage: *announce #salon message"""
+    await ctx.message.delete()
+    embed = discord.Embed(
+        title="📢 Annonce — Slayzix Shop",
+        description=message,
+        color=discord.Color.from_rgb(255, 0, 0)
+    )
+    embed.set_image(url=BANNER_URL)
+    embed.set_footer(text="Slayzix Shop")
+    embed.timestamp = discord.utils.utcnow()
+    await channel.send(embed=embed)
+    await ctx.send(embed=discord.Embed(
+        description=f"✅ Annonce envoyée dans {channel.mention}",
+        color=discord.Color.from_rgb(255, 0, 0)
+    ), delete_after=5)
+
+
+@bot.command(name="userinfo")
+async def userinfo_cmd(ctx, member: discord.Member = None):
+    """Infos sur un membre. Usage: *userinfo @membre"""
+    await ctx.message.delete()
+    target = member or ctx.author
+    roles = [r.mention for r in reversed(target.roles) if r.name != "@everyone"]
+    embed = discord.Embed(title=f"👤 {target.display_name}", color=discord.Color.from_rgb(255, 0, 0))
+    embed.set_thumbnail(url=target.display_avatar.url)
+    embed.add_field(name="ID", value=f"`{target.id}`", inline=True)
+    embed.add_field(name="Compte créé", value=f"<t:{int(target.created_at.timestamp())}:D>", inline=True)
+    embed.add_field(name="Rejoint le", value=f"<t:{int(target.joined_at.timestamp())}:D>", inline=True)
+    embed.add_field(name=f"Rôles ({len(roles)})", value=" ".join(roles[:10]) or "Aucun", inline=False)
+    embed.set_footer(text=f"Slayzix Shop • {target.name}")
+    await ctx.send(embed=embed)
+
+
+@bot.command(name="serverinfo")
+async def serverinfo_cmd(ctx):
+    """Infos sur le serveur. Usage: *serverinfo"""
+    await ctx.message.delete()
+    g = ctx.guild
+    embed = discord.Embed(title=f"🏠 {g.name}", color=discord.Color.from_rgb(255, 0, 0))
+    if g.icon:
+        embed.set_thumbnail(url=g.icon.url)
+    embed.add_field(name="👑 Owner", value=g.owner.mention, inline=True)
+    embed.add_field(name="👥 Membres", value=f"`{g.member_count}`", inline=True)
+    embed.add_field(name="📅 Créé le", value=f"<t:{int(g.created_at.timestamp())}:D>", inline=True)
+    embed.add_field(name="💬 Salons", value=f"`{len(g.channels)}`", inline=True)
+    embed.add_field(name="🎭 Rôles", value=f"`{len(g.roles)}`", inline=True)
+    embed.add_field(name="🚀 Boosts", value=f"`{g.premium_subscription_count}`", inline=True)
+    embed.set_footer(text=f"ID: {g.id}")
+    await ctx.send(embed=embed)
