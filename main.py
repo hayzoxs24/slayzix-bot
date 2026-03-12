@@ -44,7 +44,7 @@ ping_staff_cooldown = {} # channel_id -> timestamp
 ticket_claimers = {}     # channel_id -> member_id
 active_giveaways = {}
 
-# ─── NEW: extra staff who can use ticket commands (persistent) ────────────────
+# ─── extra staff who can use ticket commands (persistent) ────────────────
 ticket_staff_ids = _load_staff_ids()  # loaded from ticket_staff.json
 
 # ── Ticket options ─────────────────────────────────────────────────────────────
@@ -165,7 +165,7 @@ async def create_ticket_channel(interaction, ticket_type, payment, lang):
         sr = guild.get_role(ticket_config["support_role"])
         if sr: ow[sr] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
 
-    # NEW: give access to extra ticket staff
+    # Give access to extra ticket staff
     for sid in ticket_staff_ids:
         member = guild.get_member(sid)
         if member: ow[member] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
@@ -188,7 +188,6 @@ async def create_ticket_channel(interaction, ticket_type, payment, lang):
                        view=TicketActionsView(lang, ticket_type),
                        allowed_mentions=discord.AllowedMentions(users=True, roles=True))
 
-    # NEW: log to setlogs channel
     if ticket_config["log_channel"]:
         lc = guild.get_channel(ticket_config["log_channel"])
         if lc:
@@ -228,13 +227,61 @@ class TicketActionsView(discord.ui.View):
         await asyncio.sleep(5); await interaction.channel.delete()
 
     async def claim_cb(self, interaction):
-        ticket_claimers[interaction.channel.id] = interaction.user.id
-        txt = f"✅ Ticket pris en charge par {interaction.user.mention}" if self.lang=="fr" else f"✅ Ticket claimed by {interaction.user.mention}"
+        # ── FIX: lock channel — only claimer + admins can write ──────────────
+        guild = interaction.guild
+        channel = interaction.channel
+
+        # Find the ticket owner (user who created this ticket)
+        ticket_owner_id = next((u for u, c in open_tickets.items() if c == channel.id), None)
+        ticket_owner = guild.get_member(ticket_owner_id) if ticket_owner_id else None
+
+        # Remove write access from everyone currently in the channel
+        for target, overwrite in channel.overwrites.items():
+            if isinstance(target, discord.Member):
+                if target == interaction.user or target == guild.me:
+                    continue  # keep claimer and bot
+                if target.guild_permissions.administrator:
+                    continue  # keep admins
+                # Remove write permission for everyone else (including ticket owner)
+                new_ow = discord.PermissionOverwrite(read_messages=True, send_messages=False)
+                try: await channel.set_permissions(target, overwrite=new_ow)
+                except discord.Forbidden: pass
+
+        # Make sure claimer explicitly has full access
+        await channel.set_permissions(interaction.user, read_messages=True, send_messages=True, attach_files=True)
+
+        ticket_claimers[channel.id] = interaction.user.id
+        txt = f"✅ Ticket pris en charge par {interaction.user.mention}\n🔒 Seul le staff et les admins peuvent écrire." if self.lang=="fr" else f"✅ Ticket claimed by {interaction.user.mention}\n🔒 Only staff and admins can now write."
         await interaction.response.send_message(embed=red_embed(txt))
 
     async def unclaim_cb(self, interaction):
-        ticket_claimers.pop(interaction.channel.id, None)
-        txt = f"🔄 Ticket rendu par {interaction.user.mention}" if self.lang=="fr" else f"🔄 Ticket unclaimed by {interaction.user.mention}"
+        # ── FIX: restore write access when unclaimed ─────────────────────────
+        guild = interaction.guild
+        channel = interaction.channel
+
+        # Restore write access to ticket owner
+        ticket_owner_id = next((u for u, c in open_tickets.items() if c == channel.id), None)
+        ticket_owner = guild.get_member(ticket_owner_id) if ticket_owner_id else None
+        if ticket_owner:
+            try: await channel.set_permissions(ticket_owner, read_messages=True, send_messages=True, attach_files=True)
+            except discord.Forbidden: pass
+
+        # Restore write access to ticket staff members
+        for sid in ticket_staff_ids:
+            m = guild.get_member(sid)
+            if m:
+                try: await channel.set_permissions(m, read_messages=True, send_messages=True)
+                except discord.Forbidden: pass
+
+        # Restore support role access
+        if ticket_config["support_role"]:
+            sr = guild.get_role(ticket_config["support_role"])
+            if sr:
+                try: await channel.set_permissions(sr, read_messages=True, send_messages=True)
+                except discord.Forbidden: pass
+
+        ticket_claimers.pop(channel.id, None)
+        txt = f"🔄 Ticket rendu par {interaction.user.mention}\n🔓 Accès restauré." if self.lang=="fr" else f"🔄 Ticket unclaimed by {interaction.user.mention}\n🔓 Access restored."
         await interaction.response.send_message(embed=red_embed(txt))
 
     async def transcript_cb(self, interaction):
@@ -358,29 +405,6 @@ for _n,_k,_l in [("setfrench","role_french","🇫🇷 Français"),("setenglish",
                   ("setdeco","role_decoration","Decoration"),("setexchange","role_exchange","Exchange"),
                   ("setother","role_other","Other")]:
     make_role_cmd(_n,_k,_l)
-
-# ── PPL / LTC generic helpers ──────────────────────────────────────────────────
-def _make_crypto_cmds(name, file, data_dict, save_fn, fields_fn, modal_cls, emoji):
-    @bot.command(name=f"{name}save")
-    async def _save_cmd(ctx):
-        await ctx.message.delete()
-        class _View(discord.ui.View):
-            def __init__(self): super().__init__(timeout=60)
-            @discord.ui.button(label=f"Sauvegarder mon {name.upper()}", style=discord.ButtonStyle.secondary, emoji=emoji)
-            async def _btn(self, interaction, button):
-                if interaction.user.id != ctx.author.id: return await interaction.response.send_message("❌ Pas pour toi.", ephemeral=True)
-                await interaction.response.send_modal(modal_cls())
-        e = discord.Embed(title=f"{emoji} Sauvegarde {name.upper()}",
-                          description=f"Clique pour enregistrer.\n📌 Affiché avec `*{name}`\n🔒 Seul toi peut modifier.", color=RED)
-        e.set_thumbnail(url=ctx.author.display_avatar.url)
-        await ctx.send(embed=e, view=_View())
-
-    @bot.command(name=f"{name}delete")
-    async def _del_cmd(ctx):
-        uid = str(ctx.author.id); await ctx.message.delete()
-        if uid not in data_dict: return await ctx.send(embed=red_embed(f"❌ Aucun {name.upper()} à supprimer."), delete_after=8)
-        del data_dict[uid]; save_fn(data_dict)
-        await ctx.send(embed=red_embed(f"Ton adresse {name.upper()} a été supprimée.", f"🗑️ {name.upper()} supprimé"), delete_after=8)
 
 # ── PPL ────────────────────────────────────────────────────────────────────────
 class PPLSaveModal(discord.ui.Modal, title="💳 Sauvegarder mon PPL PayPal"):
@@ -552,14 +576,58 @@ async def vouchcount(ctx, member: discord.Member=None):
     e.set_thumbnail(url=target.display_avatar.url); await ctx.send(embed=e)
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# ── NEW: *analyse — Classement des vouchs (lit vouch_data.json au démarrage) ──
+# ── NEW: *setvouch @membre nombre — Set manuel du nombre de vouchs ────────────
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+@bot.command(name="setvouch")
+@commands.has_permissions(administrator=True)
+async def setvouch_cmd(ctx, member: discord.Member, amount: int):
+    """Set manuellement le nombre de vouchs d'un membre. Usage: *setvouch @membre 10"""
+    await ctx.message.delete()
+    if amount < 0:
+        return await ctx.send(embed=red_embed("❌ Le nombre de vouchs doit être positif.", "❌ Erreur"), delete_after=8)
+
+    sid = str(member.id)
+    old_total = vouch_counts.get(sid, 0)
+    vouch_counts[sid] = amount
+    _save("vouch_data.json", vouch_counts)
+
+    # Remove old vouch role
+    if old_total > 0:
+        old_role = discord.utils.get(ctx.guild.roles, name=f"+{old_total} vouch")
+        if old_role and old_role in member.roles:
+            try: await member.remove_roles(old_role)
+            except discord.Forbidden: pass
+
+    # Add new vouch role
+    if amount > 0:
+        role_name = f"+{amount} vouch"
+        new_role = discord.utils.get(ctx.guild.roles, name=role_name)
+        if not new_role:
+            try:
+                new_role = await ctx.guild.create_role(name=role_name, color=RED, reason="Vouch set manuel")
+                admins = [r for r in ctx.guild.roles if r.permissions.administrator and r != ctx.guild.default_role]
+                if admins:
+                    await new_role.edit(position=max(1, min(admins, key=lambda r: r.position).position - 1))
+            except discord.Forbidden: new_role = None
+        if new_role and new_role not in member.roles:
+            try: await member.add_roles(new_role)
+            except discord.Forbidden: pass
+
+    e = discord.Embed(title="✅ Vouchs mis à jour", color=RED)
+    e.add_field(name="👤 Membre",      value=member.mention,        inline=True)
+    e.add_field(name="📊 Avant",       value=f"`{old_total}`",       inline=True)
+    e.add_field(name="✅ Maintenant",  value=f"`{amount}`",          inline=True)
+    e.set_thumbnail(url=member.display_avatar.url)
+    e.set_footer(text="Slayzix Shop"); e.timestamp = discord.utils.utcnow()
+    await ctx.send(embed=e, delete_after=10)
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# ── *analyse — Classement des vouchs ─────────────────────────────────────────
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @bot.command(name="analyse")
 @commands.has_permissions(manage_guild=True)
 async def analyse_cmd(ctx):
-    """Classement complet des vouchs de tous les staff (données chargées au démarrage)."""
     await ctx.message.delete()
-
     if not vouch_counts:
         return await ctx.send(embed=red_embed("Aucun vouch enregistré pour le moment.", "📊 Analyse Vouchs"), delete_after=10)
 
@@ -576,69 +644,74 @@ async def analyse_cmd(ctx):
         bar    = "█" * filled + "░" * (20 - filled)
         lines.append(f"{medal} **{name}** — `{count}` vouch(s)\n`{bar}`")
 
-    e = discord.Embed(
-        title="📊 Analyse — Classement des Vouchs",
-        description="\n\n".join(lines),
-        color=RED
-    )
+    e = discord.Embed(title="📊 Analyse — Classement des Vouchs", description="\n\n".join(lines), color=RED)
     e.add_field(name="📦 Total vouchs",  value=f"`{total_vouches}`",       inline=True)
     e.add_field(name="👥 Staff actifs",  value=f"`{len(sorted_vouches)}`", inline=True)
-
     top_uid, top_count = sorted_vouches[0]
     top_member = ctx.guild.get_member(int(top_uid))
     top_name   = top_member.display_name if top_member else f"`{top_uid}`"
     e.add_field(name="🏆 Meilleur staff", value=f"**{top_name}** avec `{top_count}` vouch(s)", inline=False)
-
     if ctx.guild.icon: e.set_thumbnail(url=ctx.guild.icon.url)
     e.set_footer(text="Slayzix Shop • Données chargées depuis vouch_data.json")
     e.timestamp = discord.utils.utcnow()
     await ctx.send(embed=e)
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# ── NEW: *setlogs — Définir le salon de logs des tickets ─────────────────────
+# ── *setlogs ──────────────────────────────────────────────────────────────────
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @bot.command(name="setlogs")
 @commands.has_permissions(administrator=True)
 async def setlogs_cmd(ctx, channel: discord.TextChannel):
-    """Définit le salon de logs des tickets. Usage: *setlogs #salon"""
     await ctx.message.delete()
     ticket_config["log_channel"] = channel.id
-    await ctx.send(embed=red_embed(
-        f"✅ Les logs des tickets seront envoyés dans {channel.mention}",
-        "📋 Logs configurés"
-    ), delete_after=8)
+    await ctx.send(embed=red_embed(f"✅ Les logs des tickets seront envoyés dans {channel.mention}", "📋 Logs configurés"), delete_after=8)
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# ── NEW: *addaccessticket / *removeaccessticket / *listaccessticket ───────────
+# ── *addaccessticket / *removeaccessticket / *listaccessticket ────────────────
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @bot.command(name="addaccessticket")
 @commands.has_permissions(administrator=True)
 async def addaccessticket_cmd(ctx, member: discord.Member):
-    """Donne accès aux commandes ticket à un membre. Usage: *addaccessticket @membre"""
+    """Donne accès aux commandes ticket + tous les tickets existants."""
     await ctx.message.delete()
     ticket_staff_ids.add(member.id)
     _save_staff_ids()
-    await ctx.send(embed=red_embed(
-        f"✅ {member.mention} peut maintenant utiliser `*claim`, `*unclaim`, `*close`, `*finish`, `*add`, `*remove`, `*rename`, `*slowmode`.",
-        "🎫 Accès ticket accordé"
-    ), delete_after=10)
+
+    # ── FIX: add the member to ALL existing open ticket channels ─────────────
+    updated = 0
+    for user_id, channel_id in open_tickets.items():
+        channel = ctx.guild.get_channel(channel_id)
+        if channel:
+            try:
+                await channel.set_permissions(member, read_messages=True, send_messages=True)
+                updated += 1
+            except discord.Forbidden:
+                pass
+
+    desc = (f"✅ {member.mention} peut maintenant utiliser `*claim`, `*unclaim`, `*close`, `*finish`, `*add`, `*remove`, `*rename`, `*slowmode`.\n"
+            f"📂 Accès ajouté à **{updated}** ticket(s) existant(s).")
+    await ctx.send(embed=red_embed(desc, "🎫 Accès ticket accordé"), delete_after=12)
 
 @bot.command(name="removeaccessticket")
 @commands.has_permissions(administrator=True)
 async def removeaccessticket_cmd(ctx, member: discord.Member):
-    """Retire l'accès ticket d'un membre. Usage: *removeaccessticket @membre"""
+    """Retire l'accès ticket d'un membre + retire des tickets existants."""
     await ctx.message.delete()
     ticket_staff_ids.discard(member.id)
     _save_staff_ids()
-    await ctx.send(embed=red_embed(
-        f"❌ Accès ticket retiré à {member.mention}.",
-        "🎫 Accès retiré"
-    ), delete_after=8)
+
+    # Also remove from all open ticket channels
+    for user_id, channel_id in open_tickets.items():
+        channel = ctx.guild.get_channel(channel_id)
+        if channel:
+            try: await channel.set_permissions(member, overwrite=None)
+            except discord.Forbidden: pass
+
+    await ctx.send(embed=red_embed(f"❌ Accès ticket retiré à {member.mention} (tickets existants inclus).", "🎫 Accès retiré"), delete_after=8)
 
 @bot.command(name="listaccessticket")
 @commands.has_permissions(administrator=True)
 async def listaccessticket_cmd(ctx):
-    """Liste tous les membres avec accès ticket. Usage: *listaccessticket"""
     await ctx.message.delete()
     if not ticket_staff_ids:
         return await ctx.send(embed=red_embed("Aucun membre ajouté via `*addaccessticket`.", "🎫 Accès ticket"), delete_after=10)
@@ -646,13 +719,9 @@ async def listaccessticket_cmd(ctx):
     for sid in ticket_staff_ids:
         m = ctx.guild.get_member(sid)
         members_list.append(m.mention if m else f"`{sid}`")
-    await ctx.send(embed=red_embed(
-        "\n".join(members_list),
-        f"🎫 Staff ticket ({len(members_list)})"
-    ), delete_after=15)
+    await ctx.send(embed=red_embed("\n".join(members_list), f"🎫 Staff ticket ({len(members_list)})"), delete_after=15)
 
 # ── Ticket utility commands ────────────────────────────────────────────────────
-# Permission check helper: admin OR addaccessticket
 def _has_ticket_access(ctx):
     return (ctx.author.guild_permissions.administrator
             or ctx.author.guild_permissions.manage_messages
@@ -678,14 +747,57 @@ async def finish_cmd(ctx, staff: discord.Member=None):
 @bot.command(name="claim")
 async def claim_cmd(ctx):
     if not _has_ticket_access(ctx): return await ctx.send(embed=red_embed("❌ Permission refusée."), delete_after=5)
-    await ctx.message.delete(); ticket_claimers[ctx.channel.id]=ctx.author.id
-    await ctx.send(embed=red_embed(f"✅ Ticket pris en charge par {ctx.author.mention}"))
+    await ctx.message.delete()
+
+    # ── FIX: lock the channel — only claimer + admins can write ──────────────
+    channel = ctx.channel
+    guild = ctx.guild
+
+    for target, overwrite in channel.overwrites.items():
+        if isinstance(target, discord.Member):
+            if target == ctx.author or target == guild.me:
+                continue
+            if target.guild_permissions.administrator:
+                continue
+            new_ow = discord.PermissionOverwrite(read_messages=True, send_messages=False)
+            try: await channel.set_permissions(target, overwrite=new_ow)
+            except discord.Forbidden: pass
+
+    await channel.set_permissions(ctx.author, read_messages=True, send_messages=True, attach_files=True)
+    ticket_claimers[channel.id] = ctx.author.id
+    await ctx.send(embed=red_embed(f"✅ Ticket pris en charge par {ctx.author.mention}\n🔒 Seul le staff et les admins peuvent écrire."))
 
 @bot.command(name="unclaim")
 async def unclaim_cmd(ctx):
     if not _has_ticket_access(ctx): return await ctx.send(embed=red_embed("❌ Permission refusée."), delete_after=5)
-    await ctx.message.delete(); ticket_claimers.pop(ctx.channel.id,None)
-    await ctx.send(embed=red_embed(f"🔄 Ticket rendu par {ctx.author.mention}"))
+    await ctx.message.delete()
+
+    channel = ctx.channel
+    guild = ctx.guild
+
+    # Restore ticket owner
+    ticket_owner_id = next((u for u, c in open_tickets.items() if c == channel.id), None)
+    ticket_owner = guild.get_member(ticket_owner_id) if ticket_owner_id else None
+    if ticket_owner:
+        try: await channel.set_permissions(ticket_owner, read_messages=True, send_messages=True, attach_files=True)
+        except discord.Forbidden: pass
+
+    # Restore ticket staff
+    for sid in ticket_staff_ids:
+        m = guild.get_member(sid)
+        if m:
+            try: await channel.set_permissions(m, read_messages=True, send_messages=True)
+            except discord.Forbidden: pass
+
+    # Restore support role
+    if ticket_config["support_role"]:
+        sr = guild.get_role(ticket_config["support_role"])
+        if sr:
+            try: await channel.set_permissions(sr, read_messages=True, send_messages=True)
+            except discord.Forbidden: pass
+
+    ticket_claimers.pop(channel.id, None)
+    await ctx.send(embed=red_embed(f"🔄 Ticket rendu par {ctx.author.mention}\n🔓 Accès restauré."))
 
 @bot.command(name="close")
 async def close_cmd(ctx):
@@ -1061,7 +1173,7 @@ async def help_cmd(interaction):
     e.add_field(name="🔑 Accès Ticket",value="`*addaccessticket @m` `*removeaccessticket @m` `*listaccessticket`",inline=False)
     e.add_field(name="💳 PayPal",value="`*pplsave` `*ppl` `*ppldelete`",inline=False)
     e.add_field(name="🪙 LTC",value="`*ltcsave` `*ltc` `*ltcdelete`",inline=False)
-    e.add_field(name="⭐ Vouch",value="`*vouch @staff note service comment` `*vouchsetup` `*vouchcount` `*setvouchrole` `*analyse`",inline=False)
+    e.add_field(name="⭐ Vouch",value="`*vouch @staff note service comment` `*vouchsetup` `*vouchcount` `*setvouchrole` `*analyse` `*setvouch @membre nombre`",inline=False)
     e.add_field(name="🎉 Giveaway",value="`/giveaway` `/giveawayend`",inline=False)
     e.add_field(name="🛡️ Protection",value="`*protect on/off/status` `*protectlog #salon`",inline=False)
     e.add_field(name="🔨 Modération",value="`*ban` `*kick` `*mute` `*unmute` `*unban` `*clear` `*lock` `*unlock`",inline=False)
