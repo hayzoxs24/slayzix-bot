@@ -20,9 +20,9 @@ def _load(path):
 def _save(path, data):
     json.dump(data, open(path, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 
-ppl_data    = _load("ppl_data.json")
-ltc_data    = _load("ltc_data.json")
-vouch_counts= _load("vouch_data.json")
+ppl_data     = _load("ppl_data.json")
+ltc_data     = _load("ltc_data.json")
+vouch_counts = _load("vouch_data.json")
 
 def _load_staff_ids():
     d = _load("ticket_staff.json")
@@ -37,6 +37,11 @@ ticket_config = {k: None for k in (
     "role_french","role_english",
     "role_nitro","role_boost","role_decoration","role_exchange","role_other"
 )}
+
+# ── FIX: Restaure la config des rôles depuis le fichier au démarrage ───────────
+_role_config_data = _load("role_config.json")
+ticket_config.update(_role_config_data)
+
 vouch_config = {"channel": None, "role": None}
 vouch_milestone_roles = {}
 open_tickets = {}        # user_id -> channel_id
@@ -45,6 +50,14 @@ ticket_claimers = {}     # channel_id -> member_id
 active_giveaways = {}
 
 ticket_staff_ids = _load_staff_ids()
+
+ROLE_PERSIST_KEYS = [
+    "role_french","role_english","role_nitro","role_boost",
+    "role_decoration","role_exchange","role_other","support_role"
+]
+
+def _save_role_config():
+    _save("role_config.json", {k: ticket_config[k] for k in ROLE_PERSIST_KEYS if ticket_config[k]})
 
 # ── Ticket options ─────────────────────────────────────────────────────────────
 TICKET_TYPES = [
@@ -62,7 +75,13 @@ LANG_OPTIONS = [
     discord.SelectOption(label="Français", emoji="🇫🇷", value="fr"),
     discord.SelectOption(label="English",  emoji="🇬🇧", value="en"),
 ]
-TYPE_ROLE_MAP = {"Nitro":"role_nitro","Server Boost":"role_boost","Decoration":"role_decoration","Exchange":"role_exchange","Other":"role_other"}
+TYPE_ROLE_MAP = {
+    "Nitro":        "role_nitro",
+    "Server Boost": "role_boost",
+    "Decoration":   "role_decoration",
+    "Exchange":     "role_exchange",
+    "Other":        "role_other"
+}
 
 MESSAGES = {
     "fr": dict(ticket_title="<:Nitroo:1480046413441273968> Nouveau Ticket",
@@ -225,13 +244,19 @@ class TicketActionsView(discord.ui.View):
         await asyncio.sleep(5); await interaction.channel.delete()
 
     async def claim_cb(self, interaction):
+        # ── FIX: Vérification permission ──────────────────────────────────────
+        if not (interaction.user.guild_permissions.administrator
+                or interaction.user.guild_permissions.manage_messages
+                or interaction.user.id in ticket_staff_ids):
+            return await interaction.response.send_message(
+                "❌ Tu n'as pas la permission de prendre en charge ce ticket.", ephemeral=True)
+
         guild   = interaction.guild
         channel = interaction.channel
 
         ticket_owner_id = next((u for u, c in open_tickets.items() if c == channel.id), None)
         ticket_owner    = guild.get_member(ticket_owner_id) if ticket_owner_id else None
 
-        # Retirer l'écriture à tout le monde (membres + rôles) sauf claimer / bot / admins / owner
         for target, overwrite in list(channel.overwrites.items()):
             if isinstance(target, discord.Member):
                 if target == interaction.user or target == guild.me:
@@ -248,9 +273,7 @@ class TicketActionsView(discord.ui.View):
                 try: await channel.set_permissions(target, read_messages=True, send_messages=False)
                 except discord.Forbidden: pass
 
-        # Accès explicite au claimer
         await channel.set_permissions(interaction.user, read_messages=True, send_messages=True, attach_files=True)
-        # Accès explicite au créateur du ticket
         if ticket_owner:
             await channel.set_permissions(ticket_owner, read_messages=True, send_messages=True, attach_files=True)
 
@@ -261,6 +284,13 @@ class TicketActionsView(discord.ui.View):
         await interaction.response.send_message(embed=red_embed(txt))
 
     async def unclaim_cb(self, interaction):
+        # ── FIX: Vérification permission ──────────────────────────────────────
+        if not (interaction.user.guild_permissions.administrator
+                or interaction.user.guild_permissions.manage_messages
+                or interaction.user.id in ticket_staff_ids):
+            return await interaction.response.send_message(
+                "❌ Tu n'as pas la permission de rendre ce ticket.", ephemeral=True)
+
         guild   = interaction.guild
         channel = interaction.channel
 
@@ -315,19 +345,28 @@ class TicketActionsView(discord.ui.View):
             msg = f"⏳ Cooldown ! **{rem//60}m {rem%60}s**" if self.lang=="fr" else f"⏳ Cooldown! **{rem//60}m {rem%60}s**"
             return await interaction.response.send_message(msg, ephemeral=True)
         ping_staff_cooldown[interaction.channel.id] = now
+
         mentions = []
-        if ticket_config["support_role"]:
-            r = interaction.guild.get_role(ticket_config["support_role"])
+
+        # ── FIX: Ping le rôle associé au TYPE du ticket (ex: *setnitro) ───────
+        type_role_key = TYPE_ROLE_MAP.get(self.ticket_type)
+        if type_role_key and ticket_config.get(type_role_key):
+            r = interaction.guild.get_role(ticket_config[type_role_key])
             if r: mentions.append(r.mention)
-        tr = TYPE_ROLE_MAP.get(self.ticket_type)
-        if tr and ticket_config.get(tr):
-            r2 = interaction.guild.get_role(ticket_config[tr])
-            if r2 and r2.mention not in mentions: mentions.append(r2.mention)
+
+        # Ping le support_role seulement s'il est différent
+        if ticket_config["support_role"]:
+            sr = interaction.guild.get_role(ticket_config["support_role"])
+            if sr and sr.mention not in mentions:
+                mentions.append(sr.mention)
+
         if mentions:
             suffix = "Un client attend !" if self.lang=="fr" else "A customer needs help!"
-            await interaction.channel.send(" ".join(mentions)+" — "+suffix,
-                                           allowed_mentions=discord.AllowedMentions(roles=True))
-        await interaction.response.send_message("✅ Staff pingé !" if self.lang=="fr" else "✅ Staff pinged!", ephemeral=True)
+            await interaction.channel.send(
+                " ".join(mentions) + " — " + suffix,
+                allowed_mentions=discord.AllowedMentions(roles=True))
+        await interaction.response.send_message(
+            "✅ Staff pingé !" if self.lang=="fr" else "✅ Staff pinged!", ephemeral=True)
 
 
 class TicketTypeSelect(discord.ui.Select):
@@ -373,9 +412,17 @@ class SetupView(discord.ui.View):
         cat = discord.ui.ChannelSelect(placeholder="📁 Catégorie tickets", channel_types=[discord.ChannelType.category])
         log = discord.ui.ChannelSelect(placeholder="📋 Salon des logs", channel_types=[discord.ChannelType.text], row=1)
         rol = discord.ui.RoleSelect(placeholder="👮 Rôle support", row=2)
-        async def cat_cb(i): ticket_config["category"]=i.data["values"][0]; await i.response.send_message(f"✅ Catégorie OK", ephemeral=True)
-        async def log_cb(i): ticket_config["log_channel"]=int(i.data["values"][0]); await i.response.send_message(f"✅ Log OK", ephemeral=True)
-        async def rol_cb(i): ticket_config["support_role"]=int(i.data["values"][0]); await i.response.send_message(f"✅ Rôle OK", ephemeral=True)
+        async def cat_cb(i):
+            ticket_config["category"] = int(i.data["values"][0])
+            await i.response.send_message("✅ Catégorie OK", ephemeral=True)
+        async def log_cb(i):
+            ticket_config["log_channel"] = int(i.data["values"][0])
+            await i.response.send_message("✅ Log OK", ephemeral=True)
+        async def rol_cb(i):
+            ticket_config["support_role"] = int(i.data["values"][0])
+            # ── FIX: Persistance du rôle support ──────────────────────────────
+            _save_role_config()
+            await i.response.send_message("✅ Rôle OK", ephemeral=True)
         cat.callback, log.callback, rol.callback = cat_cb, log_cb, rol_cb
         self.add_item(cat); self.add_item(log); self.add_item(rol)
 
@@ -400,7 +447,10 @@ def make_role_cmd(name, key, label):
     @bot.command(name=name)
     @commands.has_permissions(administrator=True)
     async def _cmd(ctx, role: discord.Role):
-        ticket_config[key] = role.id; await ctx.message.delete()
+        ticket_config[key] = role.id
+        # ── FIX: Persistance de la config des rôles ────────────────────────────
+        _save_role_config()
+        await ctx.message.delete()
         await ctx.send(embed=red_embed(f"**{label}** → {role.mention}", "✅ Rôle configuré"), delete_after=8)
     _cmd.__name__ = name; return _cmd
 
@@ -1318,6 +1368,7 @@ async def on_ready():
     print(f"✅ {bot.user} connecté — {len(bot.commands)} commandes chargées")
     print(f"📊 Vouchs chargés: {len(vouch_counts)} entrées depuis vouch_data.json")
     print(f"🔑 Staff ticket chargés: {len(ticket_staff_ids)} membres depuis ticket_staff.json")
+    print(f"⚙️  Config rôles chargée: {[k for k, v in ticket_config.items() if v]}")
 
 # ── Start ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
