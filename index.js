@@ -302,11 +302,29 @@ client.on("interactionCreate", async (interaction) => {
       return interaction.reply({ embeds: [e], components: [payRow], ephemeral: true });
     }
 
-    // ── TICKET : sélection du paiement → créer directement (anglais par défaut) ──
+    // ── TICKET : sélection du paiement → sélection de langue ──────────────────
     if (interaction.isStringSelectMenu() && interaction.customId === "ticket_payment_select") {
       const [type, payment] = interaction.values[0].split("|");
+      const langRow = new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId("ticket_lang_select")
+          .setPlaceholder("🌍 Select your language...")
+          .addOptions([
+            { label: "Français", value: `${type}|${payment}|fr`, emoji: "🇫🇷" },
+            { label: "English",  value: `${type}|${payment}|en`, emoji: "🇬🇧" }
+          ])
+      );
+      const e = new EmbedBuilder().setColor(RED)
+        .setTitle("🌍 Language / Langue")
+        .setDescription("Please select your language.\nVeuillez sélectionner votre langue.");
+      return interaction.update({ embeds: [e], components: [langRow] });
+    }
+
+    // ── TICKET : sélection langue → créer ticket ────────────────────────────────
+    if (interaction.isStringSelectMenu() && interaction.customId === "ticket_lang_select") {
+      const [type, payment, lang] = interaction.values[0].split("|");
       await interaction.deferReply({ ephemeral: true });
-      await createTicketChannel(interaction, type, payment);
+      await createTicketChannel(interaction, type, payment, lang);
       return;
     }
 
@@ -315,7 +333,8 @@ client.on("interactionCreate", async (interaction) => {
       const id = interaction.customId;
 
       if (id === "ticket_close") {
-        await interaction.reply({ content: "🔒 Closing ticket in 5 seconds..." });
+        const isFr = ticketData[`chan_${interaction.channel.id}`]?.lang === "fr";
+        await interaction.reply({ content: isFr ? "🔒 Fermeture du ticket dans 5 secondes..." : "🔒 Closing ticket in 5 seconds..." });
         logTicket(interaction.guild, "📋 Ticket fermé", `**Salon:** ${interaction.channel.name}\n**Par:** ${interaction.user}`);
         const uid = Object.keys(openTickets).find(u => openTickets[u] === interaction.channel.id);
         if (uid) delete openTickets[uid];
@@ -338,7 +357,10 @@ client.on("interactionCreate", async (interaction) => {
         await interaction.channel.permissionOverwrites.edit(interaction.user.id, { ViewChannel: true, SendMessages: true, AttachFiles: true });
         if (owner) await interaction.channel.permissionOverwrites.edit(owner.id, { ViewChannel: true, SendMessages: true, AttachFiles: true });
         ticketClaimers[interaction.channel.id] = interaction.user.id;
-        return interaction.reply({ embeds: [redEmbed(`✅ Ticket claimed by ${interaction.user}\n🔒 Only staff and the ticket owner can write.`)] });
+        const isFr = ticketData[`chan_${interaction.channel.id}`]?.lang === "fr";
+        return interaction.reply({ embeds: [redEmbed(isFr
+          ? `✅ Ticket pris en charge par ${interaction.user}\n🔒 Seul le staff et le créateur peuvent écrire.`
+          : `✅ Ticket claimed by ${interaction.user}\n🔒 Only staff and the ticket owner can write.`)] });
       }
 
       if (id === "ticket_unclaim") {
@@ -354,7 +376,10 @@ client.on("interactionCreate", async (interaction) => {
         if (config.ticket_config?.support_role)
           await interaction.channel.permissionOverwrites.edit(config.ticket_config.support_role, { ViewChannel: true, SendMessages: true }).catch(() => {});
         delete ticketClaimers[interaction.channel.id];
-        return interaction.reply({ embeds: [redEmbed(`🔄 Ticket unclaimed by ${interaction.user}\n🔓 Access restored.`)] });
+        const isFr2 = ticketData[`chan_${interaction.channel.id}`]?.lang === "fr";
+        return interaction.reply({ embeds: [redEmbed(isFr2
+          ? `🔄 Ticket rendu par ${interaction.user}\n🔓 Accès restauré.`
+          : `🔄 Ticket unclaimed by ${interaction.user}\n🔓 Access restored.`)] });
       }
 
       if (id === "ticket_transcript") {
@@ -363,9 +388,10 @@ client.on("interactionCreate", async (interaction) => {
         const lines = [...msgs.values()].filter(m => !m.author.bot)
           .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
           .map(m => `[${new Date(m.createdTimestamp).toLocaleString("fr-FR")}] ${m.author.tag}: ${m.content}`).join("\n");
-        if (!lines) return interaction.followUp({ content: "No messages.", ephemeral: true });
+        if (!lines) return interaction.followUp({ content: ticketData[`chan_${interaction.channel.id}`]?.lang === "fr" ? "Aucun message." : "No messages.", ephemeral: true });
+        const isFrT = ticketData[`chan_${interaction.channel.id}`]?.lang === "fr";
         return interaction.followUp({
-          content: "📄 Transcript generated!",
+          content: isFrT ? "📄 Transcript généré !" : "📄 Transcript generated!",
           files: [new AttachmentBuilder(Buffer.from(lines, "utf8"), { name: `transcript-${interaction.channel.name}.txt` })],
           ephemeral: true
         });
@@ -391,8 +417,8 @@ client.on("interactionCreate", async (interaction) => {
         const tInfo = ticketData[`chan_${interaction.channel.id}`];
         if (tInfo?.type) { const k = TYPE_ROLE_MAP[tInfo.type]; if (k && config.ticket_config?.[k]) mentions.push(`<@&${config.ticket_config[k]}>`); }
         if (config.ticket_config?.support_role) { const sr = `<@&${config.ticket_config.support_role}>`; if (!mentions.includes(sr)) mentions.push(sr); }
-        if (mentions.length) await interaction.channel.send({ content: mentions.join(" ") + " — A customer needs help!", allowedMentions: { roles: mentions.map(m => m.slice(3, -1)) } });
-        return interaction.reply({ content: "✅ Staff pinged!", ephemeral: true });
+        if (mentions.length) await interaction.channel.send({ content: mentions.join(" ") + (ticketData[`chan_${interaction.channel.id}`]?.lang === "fr" ? " — Un client attend !" : " — A customer needs help!"), allowedMentions: { roles: mentions.map(m => m.slice(3, -1)) } });
+        return interaction.reply({ content: ticketData[`chan_${interaction.channel.id}`]?.lang === "fr" ? "✅ Staff pingé !" : "✅ Staff pinged!", ephemeral: true });
       }
 
       // ── Giveaway ───────────────────────────────────────────────────────────
@@ -506,9 +532,9 @@ function buildFinishModal(staffId, chanId) {
     .setCustomId(`finish_modal_${staffId}_${chanId}`)
     .setTitle("✅ Complete the transaction")
     .addComponents(
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("product").setLabel("Product (e.g. ×1 Nitro Boost)").setStyle(TextInputStyle.Short).setPlaceholder("×1 Nitro Boost").setMaxLength(100).setRequired(true)),
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("price").setLabel("Price (e.g. 3.20€)").setStyle(TextInputStyle.Short).setPlaceholder("3.20€").setMaxLength(30).setRequired(true)),
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("payment").setLabel("Payment method (e.g. PayPal, LTC)").setStyle(TextInputStyle.Short).setPlaceholder("PayPal").setMaxLength(30).setRequired(true))
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("product").setLabel("Product").setStyle(TextInputStyle.Short).setMaxLength(100).setRequired(true)),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("price").setLabel("Price").setStyle(TextInputStyle.Short).setMaxLength(30).setRequired(true)),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("payment").setLabel("Payment method").setStyle(TextInputStyle.Short).setMaxLength(30).setRequired(true))
     );
 }
 
@@ -517,12 +543,12 @@ function logTicket(guild, title, desc) {
   if (lc) lc.send({ embeds: [redEmbed(desc, title).setTimestamp()] }).catch(() => {});
 }
 
-async function createTicketChannel(interaction, type, payment) {
+async function createTicketChannel(interaction, type, payment, lang = "en") {
   const guild = interaction.guild, user = interaction.user;
 
   if (openTickets[user.id]) {
     const ex = guild.channels.cache.get(openTickets[user.id]);
-    if (ex) return interaction.followUp({ content: `❌ You already have an open ticket → ${ex}`, ephemeral: true });
+    if (ex) return interaction.followUp({ content: lang === "fr" ? `❌ Tu as déjà un ticket ouvert → ${ex}` : `❌ You already have an open ticket → ${ex}`, ephemeral: true });
   }
 
   const tc = config.ticket_config || {};
@@ -547,42 +573,49 @@ async function createTicketChannel(interaction, type, payment) {
   });
 
   openTickets[user.id] = channel.id;
-  ticketData[`chan_${channel.id}`] = { type, payment, userId: user.id };
+  ticketData[`chan_${channel.id}`] = { type, payment, lang, userId: user.id };
   saveJSON("./data/tickets.json", ticketData);
+
+  const isFr = lang === "fr";
 
   // Embed ticket avec titre et emojis du code Python original
   const embed = new EmbedBuilder().setColor(RED)
-    .setTitle("<:Nitroo:1480046413441273968> New Ticket")
-    .setDescription("Support will be with you shortly.\n\nTo close this ticket, press the close button below.")
+    .setTitle("<:Nitroo:1480046413441273968> " + (isFr ? "Nouveau Ticket" : "New Ticket"))
+    .setDescription(isFr
+      ? "Le support sera avec vous rapidement.\n\nPour fermer ce ticket, appuyez sur le bouton Fermer."
+      : "Support will be with you shortly.\n\nTo close this ticket, press the close button below.")
     .addFields(
-      { name: "<:Nitroo:1480046413441273968> Type",           value: type,    inline: true },
-      { name: "<:Paiement:1480046846658351276> Payment",      value: payment, inline: true },
-      { name: "🌍 Language",                                  value: "🇬🇧 English", inline: true }
+      { name: "<:Nitroo:1480046413441273968> Type",      value: type,    inline: true },
+      { name: "<:Paiement:1480046846658351276> Payment", value: payment, inline: true },
+      { name: "🌍 Language", value: isFr ? "🇫🇷 Français" : "🇬🇧 English", inline: true }
     )
-    .setFooter({ text: "🔔 Use Ping Staff if no response after 15 min (15 min cooldown)" })
+    .setFooter({ text: isFr
+      ? "🔔 Utilisez Ping Staff si aucune réponse après 15 min (cooldown 15 min)"
+      : "🔔 Use Ping Staff if no response after 15 min (15 min cooldown)" })
     .setTimestamp();
 
   // Boutons repris exactement du code Python original
   const row1 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId("ticket_close")     .setLabel("Close")      .setStyle(ButtonStyle.Secondary).setEmoji("<:Other:1480047561615085638>"),
-    new ButtonBuilder().setCustomId("ticket_claim")     .setLabel("Claim")      .setStyle(ButtonStyle.Secondary).setEmoji("<:Boost:1480046746146050149>"),
-    new ButtonBuilder().setCustomId("ticket_unclaim")   .setLabel("Unclaim")    .setStyle(ButtonStyle.Secondary).setEmoji("<:Exchange:1480047481491427492>"),
-    new ButtonBuilder().setCustomId("ticket_transcript").setLabel("Transcript") .setStyle(ButtonStyle.Secondary).setEmoji("<:Transcript:1480047021707759727>")
+    new ButtonBuilder().setCustomId("ticket_close")     .setLabel(isFr ? "Fermer"           : "Close")      .setStyle(ButtonStyle.Secondary).setEmoji("<:Other:1480047561615085638>"),
+    new ButtonBuilder().setCustomId("ticket_claim")     .setLabel(isFr ? "Prendre en charge": "Claim")      .setStyle(ButtonStyle.Secondary).setEmoji("<:Boost:1480046746146050149>"),
+    new ButtonBuilder().setCustomId("ticket_unclaim")   .setLabel(isFr ? "Rendre"           : "Unclaim")    .setStyle(ButtonStyle.Secondary).setEmoji("<:Exchange:1480047481491427492>"),
+    new ButtonBuilder().setCustomId("ticket_transcript").setLabel("Transcript")                              .setStyle(ButtonStyle.Secondary).setEmoji("<:Transcript:1480047021707759727>")
   );
   const row2 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId("ticket_finish")    .setLabel("Finish")     .setStyle(ButtonStyle.Secondary).setEmoji("<:oui:1480176155989508348>"),
-    new ButtonBuilder().setCustomId("ticket_ping")      .setLabel("Ping Staff") .setStyle(ButtonStyle.Secondary).setEmoji("<:Discord:1480047123188944906>")
+    new ButtonBuilder().setCustomId("ticket_finish")    .setLabel("Finish")                                  .setStyle(ButtonStyle.Secondary).setEmoji("<:oui:1480176155989508348>"),
+    new ButtonBuilder().setCustomId("ticket_ping")      .setLabel("Ping Staff")                              .setStyle(ButtonStyle.Secondary).setEmoji("<:Discord:1480047123188944906>")
   );
 
   // Mentions
   let mentions = `${user}`;
   if (tc.support_role) mentions += ` <@&${tc.support_role}>`;
-  if (tc.role_english) mentions += ` <@&${tc.role_english}>`;
+  if (isFr && tc.role_french)   mentions += ` <@&${tc.role_french}>`;
+  if (!isFr && tc.role_english) mentions += ` <@&${tc.role_english}>`;
   const tk = TYPE_ROLE_MAP[type]; if (tk && tc[tk]) mentions += ` <@&${tc[tk]}>`;
 
   await channel.send({ content: mentions, embeds: [embed], components: [row1, row2], allowedMentions: { parse: ["users", "roles"] } });
-  logTicket(guild, "📋 Ticket ouvert", `**User:** ${user}\n**Type:** ${type}\n**Payment:** ${payment}\n**Channel:** ${channel}`);
-  await interaction.followUp({ content: `✅ Ticket created → ${channel}`, ephemeral: true });
+  logTicket(guild, "📋 Ticket ouvert", `**User:** ${user}\n**Type:** ${type}\n**Payment:** ${payment}\n**Lang:** ${lang}\n**Channel:** ${channel}`);
+  await interaction.followUp({ content: isFr ? `✅ Ticket créé → ${channel}` : `✅ Ticket created → ${channel}`, ephemeral: true });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
