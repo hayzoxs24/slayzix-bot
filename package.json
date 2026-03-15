@@ -1,0 +1,22 @@
+{
+  "name": "slayzix-bot",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "chalk": "^4.1.2",
+    "discord.js": "^14.23.2",
+    "figlet": "^1.9.3",
+    "inquirer": "^8.2.7"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
