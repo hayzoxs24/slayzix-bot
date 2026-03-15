@@ -421,6 +421,16 @@ client.on("interactionCreate", async (interaction) => {
         return interaction.reply({ content: ticketData[`chan_${interaction.channel.id}`]?.lang === "fr" ? "✅ Staff pingé !" : "✅ Staff pinged!", ephemeral: true });
       }
 
+      // ── TOS ────────────────────────────────────────────────────────────────
+      if (id === "tos_fr" || id === "tos_en") {
+        const { EmbedBuilder: EB } = require("discord.js");
+        const tosCmd = require("./commands/tos");
+        const lang = id === "tos_fr" ? "fr" : "en";
+        const title = lang === "fr" ? "📋 Slayzix Shop — CGV" : "📋 Slayzix Shop — TOS";
+        const embed = new EmbedBuilder().setColor(RED).setTitle(title).setDescription(tosCmd.TOS[lang]).setImage(BANNER_URL);
+        return interaction.reply({ embeds: [embed], ephemeral: true });
+      }
+
       // ── Giveaway ───────────────────────────────────────────────────────────
       if (id.startsWith("giveaway_")) {
         const gid = id.split("_")[1];
