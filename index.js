@@ -624,10 +624,14 @@ client.on("interactionCreate", async (interaction) => {
               .setTitle("✅ Thank you for your purchase — Slayzix Shop!")
               .setDescription(
                 `Your order has been processed by ${staffMember ? staffMember.toString() : `<@${staffId}>`}!\n\n` +
-                `**📦 Product:** ${product}\n**💰 Price:** ${price}\n**💳 Payment:** ${payment}\n\n` +
-                `━━━━━━━━━━━━━━━━━━━━\n⭐ **You have 1 hour to leave your vouch!**\n\n` +
-                `👉 Join our server: **${VOUCH_SERVER_INVITE}**\n\nThen send in **#vouchs**:\n\`\`\`${vouchMsg}\`\`\`\n` +
-                `━━━━━━━━━━━━━━━━━━━━\n⚠️ If you don't vouch within **1 hour**, you will receive a **warn**.\nAt **3 warns** you will be **automatically banned** from all servers.`
+                `**📦 Product:** ${product} | **💰 Price:** ${price} | **💳 Payment:** ${payment}\n\n` +
+                `━━━━━━━━━━━━━━━━━━━━\n` +
+                `⭐ **C'est ici que tu laisses ton vouch !**\n` +
+                `👉 **${VOUCH_SERVER_INVITE}**\n\n` +
+                `Envoie ce message dans **#vouchs** :\n\`\`\`${vouchMsg}\`\`\`\n` +
+                `━━━━━━━━━━━━━━━━━━━━\n` +
+                `⚠️ Tout vouch non effectué dans **1h** = **warn automatique**\n` +
+                `🔨 **3 warns = ban permanent** de tous les serveurs.`
               )
               .setImage(BANNER_URL).setFooter({ text: "Slayzix Shop • Thank you for your trust 🤝" }).setTimestamp();
             await owner.send({ embeds: [dm] });
@@ -733,11 +737,8 @@ async function createTicketChannel(interaction, type, payment, lang = "en") {
   const row1 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId("ticket_close")  .setLabel(isFr ? "Fermer"            : "Close")   .setStyle(ButtonStyle.Secondary).setEmoji("<:Other:1480047561615085638>"),
     new ButtonBuilder().setCustomId("ticket_claim")  .setLabel(isFr ? "Prendre en charge" : "Claim")   .setStyle(ButtonStyle.Secondary).setEmoji("<:Boost:1480046746146050149>"),
-    new ButtonBuilder().setCustomId("ticket_unclaim").setLabel(isFr ? "Rendre"            : "Unclaim") .setStyle(ButtonStyle.Secondary).setEmoji("<:Exchange:1480047481491427492>")
-  );
-  const row2 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId("ticket_finish").setLabel("Finish")     .setStyle(ButtonStyle.Secondary).setEmoji("<:oui:1480176155989508348>"),
-    new ButtonBuilder().setCustomId("ticket_ping")  .setLabel("Ping Staff") .setStyle(ButtonStyle.Secondary).setEmoji("<:Discord:1480047123188944906>")
+    new ButtonBuilder().setCustomId("ticket_unclaim").setLabel(isFr ? "Rendre"            : "Unclaim") .setStyle(ButtonStyle.Secondary).setEmoji("<:Exchange:1480047481491427492>"),
+    new ButtonBuilder().setCustomId("ticket_ping")   .setLabel("Ping Staff")                            .setStyle(ButtonStyle.Secondary).setEmoji("<:Discord:1480047123188944906>")
   );
 
   let mentions = `${user}`;
@@ -746,7 +747,7 @@ async function createTicketChannel(interaction, type, payment, lang = "en") {
   if (!isFr && tc.role_english) mentions += ` <@&${tc.role_english}>`;
   if (tc[TYPE_ROLE_MAP[type]])  mentions += ` <@&${tc[TYPE_ROLE_MAP[type]]}>`;
 
-  await channel.send({ content: mentions, embeds: [embed], components: [row1, row2], allowedMentions: { parse: ["users", "roles"] } });
+  await channel.send({ content: mentions, embeds: [embed], components: [row1], allowedMentions: { parse: ["users", "roles"] } });
   logTicket(guild, "📋 Ticket ouvert", `**User:** ${user}\n**Type:** ${type}\n**Payment:** ${payment}\n**Lang:** ${lang}\n**Channel:** ${channel}`);
   await interaction.editReply({ embeds: [new EmbedBuilder().setColor(RED).setDescription(isFr ? `✅ Ticket créé → ${channel}` : `✅ Ticket created → ${channel}`)], components: [] }).catch(() => {});
 }
