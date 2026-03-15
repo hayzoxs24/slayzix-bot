@@ -598,8 +598,11 @@ client.on("interactionCreate", async (interaction) => {
         // Nettoyer le state
         delete finishPending[key];
 
-        const ownerUid    = Object.keys(openTickets).find(u => openTickets[u] === chanId);
-        const owner       = ownerUid ? interaction.guild.members.cache.get(ownerUid) : null;
+        // Récupérer l'owner depuis ticketData (persistant) en priorité, sinon openTickets (mémoire)
+        const chanData    = ticketData[`chan_${chanId}`];
+        const ownerUid    = chanData?.userId
+                          || Object.keys(openTickets).find(u => openTickets[u] === chanId);
+        const owner       = ownerUid ? interaction.guild.members.cache.get(String(ownerUid)) : null;
 
         const vouchMsg = `+vouch ${staffMember ? staffMember.toString() : `<@${staffId}>`} ${product} | ${price} | ${payment}`;
 
