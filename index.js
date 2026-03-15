@@ -323,7 +323,7 @@ client.on("interactionCreate", async (interaction) => {
     // ── TICKET : sélection langue → créer ticket ────────────────────────────────
     if (interaction.isStringSelectMenu() && interaction.customId === "ticket_lang_select") {
       const [type, payment, lang] = interaction.values[0].split("|");
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.update({ components: [], embeds: [new EmbedBuilder().setColor(RED).setDescription("⏳ Creating your ticket...")] });
       await createTicketChannel(interaction, type, payment, lang);
       return;
     }
@@ -615,7 +615,7 @@ async function createTicketChannel(interaction, type, payment, lang = "en") {
 
   await channel.send({ content: mentions, embeds: [embed], components: [row1, row2], allowedMentions: { parse: ["users", "roles"] } });
   logTicket(guild, "📋 Ticket ouvert", `**User:** ${user}\n**Type:** ${type}\n**Payment:** ${payment}\n**Lang:** ${lang}\n**Channel:** ${channel}`);
-  await interaction.followUp({ content: isFr ? `✅ Ticket créé → ${channel}` : `✅ Ticket created → ${channel}`, ephemeral: true });
+  await interaction.editReply({ embeds: [new EmbedBuilder().setColor(RED).setDescription(isFr ? `✅ Ticket créé → ${channel}` : `✅ Ticket created → ${channel}`)], components: [] }).catch(() => {});
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
