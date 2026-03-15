@@ -51,15 +51,38 @@ const TOS_TEXT = {
 };
 
 // Propositions de produits par type de ticket
-const PRODUCT_SUGGESTIONS = {
-  "Nitro":        ["×1 Nitro Basic", "×1 Nitro Classic", "×1 Nitro"],
-  "Server Boost": ["×1 Server Boost", "×2 Server Boosts", "×3 Server Boosts"],
-  "Decoration":   ["×1 Profile Effect", "×1 Profile Banner", "×1 Avatar Decoration"],
-  "Exchange":     ["Exchange Nitro → Cash", "Exchange Boost → Cash", "Exchange Gift → Cash"],
-  "Other":        [] // champ libre
+const PRODUCT_OPTIONS = {
+  "Nitro": [
+    { label: "×1 Nitro Basic",    value: "×1 Nitro Basic" },
+    { label: "×1 Nitro Classic",  value: "×1 Nitro Classic" },
+    { label: "×1 Nitro",          value: "×1 Nitro" },
+    { label: "×3 Nitro Basic",    value: "×3 Nitro Basic" },
+    { label: "×3 Nitro Classic",  value: "×3 Nitro Classic" },
+  ],
+  "Server Boost": [
+    { label: "×1 Server Boost",   value: "×1 Server Boost" },
+    { label: "×2 Server Boosts",  value: "×2 Server Boosts" },
+    { label: "×3 Server Boosts",  value: "×3 Server Boosts" },
+    { label: "×7 Server Boosts",  value: "×7 Server Boosts" },
+    { label: "×14 Server Boosts", value: "×14 Server Boosts" },
+  ],
+  "Decoration": [
+    { label: "×1 Profile Effect",    value: "×1 Profile Effect" },
+    { label: "×1 Profile Banner",    value: "×1 Profile Banner" },
+    { label: "×1 Avatar Decoration", value: "×1 Avatar Decoration" },
+    { label: "×1 Profile Theme",     value: "×1 Profile Theme" },
+  ],
+  "Exchange": [
+    { label: "Exchange Nitro → Cash",  value: "Exchange Nitro → Cash" },
+    { label: "Exchange Boost → Cash",  value: "Exchange Boost → Cash" },
+    { label: "Exchange Gift → Cash",   value: "Exchange Gift → Cash" },
+    { label: "Exchange Cash → Nitro",  value: "Exchange Cash → Nitro" },
+  ],
+  "Other": []
 };
 
 const openTickets    = {};
+const finishPending  = {}; // userId_chanId -> { product, payment }
 const ticketClaimers = {};
 const pingCooldowns  = {};
 const spamTracker    = {};
@@ -93,55 +116,63 @@ function logTicket(guild, title, desc) {
 }
 
 // ── Modal finish dynamique selon le type de ticket ────────────────────────────
-function buildFinishModal(staffId, chanId, ticketType) {
+// Envoyer le panel finish (select menus) — étape 1
+async function sendFinishPanel(interaction, staffId, chanId, ticketType) {
   const isOther = ticketType === "Other";
-  const suggestions = PRODUCT_SUGGESTIONS[ticketType] || [];
-  const productLabel = isOther ? "Produit / Product" : `Produit (${suggestions.slice(0,2).join(", ")})`;
-  const productPlaceholder = isOther ? "" : suggestions[0] || "";
+  const options = PRODUCT_OPTIONS[ticketType] || [];
+  const rows = [];
 
+  // Row 1 : produit (select ou texte selon le type)
+  if (!isOther && options.length > 0) {
+    rows.push(new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId(`finish_product_${staffId}_${chanId}`)
+        .setPlaceholder("📦 Sélectionne le produit...")
+        .addOptions(options)
+    ));
+  }
+
+  // Row 2 : paiement
+  rows.push(new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`finish_payment_${staffId}_${chanId}`)
+      .setPlaceholder("💳 Sélectionne le moyen de paiement...")
+      .addOptions([
+        { label: "PayPal", value: "PayPal", emoji: "<:PPL:1480046672162852985>" },
+        { label: "LTC",    value: "LTC",    emoji: "<:LTC:1480634361555452176>" }
+      ])
+  ));
+
+  const embed = new EmbedBuilder().setColor(RED)
+    .setTitle("✅ Finish — Transaction")
+    .setDescription(
+      isOther
+        ? "**1.** Sélectionne le moyen de paiement\n**2.** Clique sur **Confirmer** pour entrer le produit et le prix"
+        : "**1.** Sélectionne le produit\n**2.** Sélectionne le moyen de paiement\n**3.** Clique sur **Confirmer** pour entrer le prix"
+    );
+
+  rows.push(new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`finish_confirm_${staffId}_${chanId}`).setLabel("Confirmer").setStyle(ButtonStyle.Success).setEmoji("✅")
+  ));
+
+  await interaction.reply({ embeds: [embed], components: rows, flags: 64 });
+}
+
+// Modal final pour le prix (+ produit si Other)
+function buildPriceModal(staffId, chanId, isOther) {
   const modal = new ModalBuilder()
-    .setCustomId(`finish_modal_${staffId}_${chanId}`)
-    .setTitle("✅ Complete the transaction");
+    .setCustomId(`finish_price_modal_${staffId}_${chanId}`)
+    .setTitle("✅ Finaliser la transaction");
 
-  // Champ produit — texte libre pour Other, sinon suggestion
-  modal.addComponents(
-    new ActionRowBuilder().addComponents(
-      new TextInputBuilder()
-        .setCustomId("product")
-        .setLabel(productLabel)
-        .setStyle(isOther ? TextInputStyle.Paragraph : TextInputStyle.Short)
-        .setPlaceholder(productPlaceholder)
-        .setMaxLength(200)
-        .setRequired(true)
-    )
-  );
+  if (isOther) {
+    modal.addComponents(new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId("product").setLabel("Produit / Product").setStyle(TextInputStyle.Short).setMaxLength(200).setRequired(true)
+    ));
+  }
 
-  // Prix — avec € pré-rempli
-  modal.addComponents(
-    new ActionRowBuilder().addComponents(
-      new TextInputBuilder()
-        .setCustomId("price")
-        .setLabel("Prix / Price (€)")
-        .setStyle(TextInputStyle.Short)
-        .setPlaceholder("3.20€")
-        .setValue("€")
-        .setMaxLength(20)
-        .setRequired(true)
-    )
-  );
-
-  // Paiement — PayPal ou LTC
-  modal.addComponents(
-    new ActionRowBuilder().addComponents(
-      new TextInputBuilder()
-        .setCustomId("payment")
-        .setLabel("Paiement — PayPal ou LTC")
-        .setStyle(TextInputStyle.Short)
-        .setPlaceholder("PayPal")
-        .setMaxLength(20)
-        .setRequired(true)
-    )
-  );
+  modal.addComponents(new ActionRowBuilder().addComponents(
+    new TextInputBuilder().setCustomId("price").setLabel("Prix / Price").setStyle(TextInputStyle.Short).setPlaceholder("3.20").setMaxLength(20).setRequired(true)
+  ));
 
   return modal;
 }
@@ -353,6 +384,30 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
+    // ── Finish select produit ─────────────────────────────────────────────
+    if (interaction.isStringSelectMenu() && interaction.customId.startsWith("finish_product_")) {
+      const parts   = interaction.customId.split("_");
+      const staffId = parts[2];
+      const chanId  = parts[3];
+      const key = `${interaction.user.id}_${chanId}`;
+      if (!finishPending[key]) finishPending[key] = {};
+      finishPending[key].product = interaction.values[0];
+      finishPending[key].staffId = staffId;
+      return interaction.reply({ content: `✅ Produit sélectionné : **${interaction.values[0]}**`, flags: 64 });
+    }
+
+    // ── Finish select paiement ────────────────────────────────────────────
+    if (interaction.isStringSelectMenu() && interaction.customId.startsWith("finish_payment_")) {
+      const parts   = interaction.customId.split("_");
+      const staffId = parts[2];
+      const chanId  = parts[3];
+      const key = `${interaction.user.id}_${chanId}`;
+      if (!finishPending[key]) finishPending[key] = {};
+      finishPending[key].payment = interaction.values[0];
+      finishPending[key].staffId = staffId;
+      return interaction.reply({ content: `✅ Paiement sélectionné : **${interaction.values[0]}**`, flags: 64 });
+    }
+
     // ── Select paiement → langue ───────────────────────────────────────────
     if (interaction.isStringSelectMenu() && interaction.customId === "ticket_payment_select") {
       const [type, payment] = interaction.values[0].split("|");
@@ -470,14 +525,33 @@ client.on("interactionCreate", async (interaction) => {
         });
       }
 
-      // Finish
+      // Finish — étape 1 : panel select
       if (id === "ticket_finish") {
         if (!hasTicketAccess(interaction.member))
           return interaction.reply({ content: isFr ? "❌ Permission refusée." : "❌ Permission denied.", flags: 64 });
         const claimerId = ticketClaimers[interaction.channel.id];
         const claimer   = claimerId ? interaction.guild.members.cache.get(claimerId) : null;
         if (!claimer) return interaction.reply({ content: isFr ? "❌ Aucun staff n'a claim ce ticket !" : "❌ No staff has claimed this ticket yet!", flags: 64 });
-        return interaction.showModal(buildFinishModal(claimer.id, interaction.channel.id, cType));
+        return sendFinishPanel(interaction, claimer.id, interaction.channel.id, cType);
+      }
+
+      // Finish — bouton Confirmer → modal prix
+      if (id.startsWith("finish_confirm_")) {
+        const parts   = id.split("_");
+        const staffId = parts[2];
+        const chanId  = parts[3];
+        const tType   = ticketData[`chan_${chanId}`]?.type || "Other";
+        const isOther = tType === "Other";
+
+        // Récupérer produit et paiement sélectionnés
+        const finishState = finishPending[`${interaction.user.id}_${chanId}`] || {};
+        if (!finishState.payment) {
+          return interaction.reply({ content: "❌ Sélectionne d'abord le moyen de paiement !", flags: 64 });
+        }
+        if (!isOther && !finishState.product) {
+          return interaction.reply({ content: "❌ Sélectionne d'abord le produit !", flags: 64 });
+        }
+        return interaction.showModal(buildPriceModal(staffId, chanId, isOther));
       }
 
       // Ping Staff
@@ -517,20 +591,34 @@ client.on("interactionCreate", async (interaction) => {
     // ── Modals ─────────────────────────────────────────────────────────────
     if (interaction.isModalSubmit()) {
 
-      // Finish
-      if (interaction.customId.startsWith("finish_modal_")) {
+      // Finish — modal prix final
+      if (interaction.customId.startsWith("finish_price_modal_")) {
         const parts       = interaction.customId.split("_");
-        const staffId     = parts[2];
-        const chanId      = parts[3];
+        const staffId     = parts[3];
+        const chanId      = parts[4];
         const staffMember = interaction.guild.members.cache.get(staffId);
-        const product     = interaction.fields.getTextInputValue("product").trim();
-        const priceRaw    = interaction.fields.getTextInputValue("price").trim();
-        const payment     = interaction.fields.getTextInputValue("payment").trim();
+        const tType       = ticketData[`chan_${chanId}`]?.type || "Other";
+        const isOther     = tType === "Other";
+        const key         = `${interaction.user.id}_${chanId}`;
+        const state       = finishPending[key] || {};
+
+        // Produit : depuis le state (select) ou depuis le modal (Other)
+        const product = isOther
+          ? interaction.fields.getTextInputValue("product").trim()
+          : (state.product || "?");
+
+        // Prix — forcer € si absent
+        const priceRaw = interaction.fields.getTextInputValue("price").trim();
+        const price    = priceRaw.includes("€") ? priceRaw : `${priceRaw}€`;
+
+        // Paiement depuis le state
+        const payment = state.payment || "?";
+
+        // Nettoyer le state
+        delete finishPending[key];
+
         const ownerUid    = Object.keys(openTickets).find(u => openTickets[u] === chanId);
         const owner       = ownerUid ? interaction.guild.members.cache.get(ownerUid) : null;
-
-        // Forcer le signe € si absent
-        const price = priceRaw.includes("€") ? priceRaw : `${priceRaw}€`;
 
         const vouchMsg = `+vouch ${staffMember ? staffMember.toString() : `<@${staffId}>`} ${product} | ${price} | ${payment}`;
 
