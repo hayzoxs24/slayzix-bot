@@ -7,6 +7,7 @@ const TOS = {
 
 module.exports = {
   name: "tos",
+  TOS, // exporté pour index.js
   async execute(message, args, client, ctx) {
     if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
     await message.delete().catch(() => {});
@@ -20,17 +21,6 @@ module.exports = {
       .setDescription("Choisissez votre langue / Choose your language.")
       .setImage(ctx.BANNER_URL);
 
-    const msg = await message.channel.send({ embeds: [e], components: [row] });
-    const col = msg.createMessageComponentCollector({ time: 0 }); // permanent
-    col.on("collect", async i => {
-      if (i.customId === "tos_fr") {
-        const embed = new EmbedBuilder().setColor(ctx.RED).setTitle("📋 Slayzix Shop — CGV").setDescription(TOS.fr).setImage(ctx.BANNER_URL);
-        return i.reply({ embeds: [embed], ephemeral: true });
-      }
-      if (i.customId === "tos_en") {
-        const embed = new EmbedBuilder().setColor(ctx.RED).setTitle("📋 Slayzix Shop — TOS").setDescription(TOS.en).setImage(ctx.BANNER_URL);
-        return i.reply({ embeds: [embed], ephemeral: true });
-      }
-    });
+    await message.channel.send({ embeds: [e], components: [row] });
   }
 };
