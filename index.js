@@ -53,30 +53,26 @@ const TOS_TEXT = {
 // Propositions de produits par type de ticket
 const PRODUCT_OPTIONS = {
   "Nitro": [
-    { label: "×1 Nitro Basic",    value: "×1 Nitro Basic" },
-    { label: "×1 Nitro Classic",  value: "×1 Nitro Classic" },
-    { label: "×1 Nitro",          value: "×1 Nitro" },
-    { label: "×3 Nitro Basic",    value: "×3 Nitro Basic" },
-    { label: "×3 Nitro Classic",  value: "×3 Nitro Classic" },
+    { label: "Nitro",       value: "Nitro" },
+    { label: "Nitro Boost", value: "Nitro Boost" },
   ],
   "Server Boost": [
-    { label: "×1 Server Boost",   value: "×1 Server Boost" },
-    { label: "×2 Server Boosts",  value: "×2 Server Boosts" },
-    { label: "×3 Server Boosts",  value: "×3 Server Boosts" },
-    { label: "×7 Server Boosts",  value: "×7 Server Boosts" },
-    { label: "×14 Server Boosts", value: "×14 Server Boosts" },
+    { label: "Server Boost x14 1 Month",  value: "Server Boost x14 1 Month" },
+    { label: "Server Boost x14 3 Months", value: "Server Boost x14 3 Months" },
   ],
   "Decoration": [
     { label: "×1 Profile Effect",    value: "×1 Profile Effect" },
     { label: "×1 Profile Banner",    value: "×1 Profile Banner" },
     { label: "×1 Avatar Decoration", value: "×1 Avatar Decoration" },
-    { label: "×1 Profile Theme",     value: "×1 Profile Theme" },
+    { label: "×1 Pack Deco",         value: "×1 Pack Deco" },
   ],
   "Exchange": [
-    { label: "Exchange Nitro → Cash",  value: "Exchange Nitro → Cash" },
-    { label: "Exchange Boost → Cash",  value: "Exchange Boost → Cash" },
-    { label: "Exchange Gift → Cash",   value: "Exchange Gift → Cash" },
-    { label: "Exchange Cash → Nitro",  value: "Exchange Cash → Nitro" },
+    { label: "Exchange Nitro → Cash",   value: "Exchange Nitro → Cash" },
+    { label: "Exchange Boost → Cash",   value: "Exchange Boost → Cash" },
+    { label: "Exchange Gift → Cash",    value: "Exchange Gift → Cash" },
+    { label: "Exchange Cash → Nitro",   value: "Exchange Cash → Nitro" },
+    { label: "PayPal → LTC",            value: "PayPal → LTC" },
+    { label: "LTC → PayPal",            value: "LTC → PayPal" },
   ],
   "Other": []
 };
@@ -171,7 +167,7 @@ function buildPriceModal(staffId, chanId, isOther) {
   }
 
   modal.addComponents(new ActionRowBuilder().addComponents(
-    new TextInputBuilder().setCustomId("price").setLabel("Prix / Price").setStyle(TextInputStyle.Short).setPlaceholder("3.20").setMaxLength(20).setRequired(true)
+    new TextInputBuilder().setCustomId("price").setLabel("Prix / Price").setStyle(TextInputStyle.Short).setPlaceholder("...").setMaxLength(20).setRequired(true)
   ));
 
   return modal;
@@ -510,21 +506,6 @@ client.on("interactionCreate", async (interaction) => {
         )] });
       }
 
-      // Transcript
-      if (id === "ticket_transcript") {
-        await interaction.deferReply({ flags: 64 });
-        const msgs  = await interaction.channel.messages.fetch({ limit: 200 });
-        const lines = [...msgs.values()].filter(m => !m.author.bot)
-          .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
-          .map(m => `[${new Date(m.createdTimestamp).toLocaleString("fr-FR")}] ${m.author.tag}: ${m.content}`).join("\n");
-        if (!lines) return interaction.followUp({ content: isFr ? "Aucun message." : "No messages.", flags: 64 });
-        return interaction.followUp({
-          content: isFr ? "📄 Transcript généré !" : "📄 Transcript generated!",
-          files: [new AttachmentBuilder(Buffer.from(lines, "utf8"), { name: `transcript-${interaction.channel.name}.txt` })],
-          flags: 64
-        });
-      }
-
       // Finish — étape 1 : panel select
       if (id === "ticket_finish") {
         if (!hasTicketAccess(interaction.member))
@@ -747,10 +728,9 @@ async function createTicketChannel(interaction, type, payment, lang = "en") {
     .setTimestamp();
 
   const row1 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId("ticket_close")     .setLabel(isFr ? "Fermer"            : "Close")     .setStyle(ButtonStyle.Secondary).setEmoji("<:Other:1480047561615085638>"),
-    new ButtonBuilder().setCustomId("ticket_claim")     .setLabel(isFr ? "Prendre en charge" : "Claim")     .setStyle(ButtonStyle.Secondary).setEmoji("<:Boost:1480046746146050149>"),
-    new ButtonBuilder().setCustomId("ticket_unclaim")   .setLabel(isFr ? "Rendre"            : "Unclaim")   .setStyle(ButtonStyle.Secondary).setEmoji("<:Exchange:1480047481491427492>"),
-    new ButtonBuilder().setCustomId("ticket_transcript").setLabel("Transcript")                              .setStyle(ButtonStyle.Secondary).setEmoji("<:Transcript:1480047021707759727>")
+    new ButtonBuilder().setCustomId("ticket_close")  .setLabel(isFr ? "Fermer"            : "Close")   .setStyle(ButtonStyle.Secondary).setEmoji("<:Other:1480047561615085638>"),
+    new ButtonBuilder().setCustomId("ticket_claim")  .setLabel(isFr ? "Prendre en charge" : "Claim")   .setStyle(ButtonStyle.Secondary).setEmoji("<:Boost:1480046746146050149>"),
+    new ButtonBuilder().setCustomId("ticket_unclaim").setLabel(isFr ? "Rendre"            : "Unclaim") .setStyle(ButtonStyle.Secondary).setEmoji("<:Exchange:1480047481491427492>")
   );
   const row2 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId("ticket_finish").setLabel("Finish")     .setStyle(ButtonStyle.Secondary).setEmoji("<:oui:1480176155989508348>"),
